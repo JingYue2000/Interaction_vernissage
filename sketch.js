@@ -4,7 +4,7 @@ const PAL_ACCENT = "#00d2ff-#d81159-#f52f57-#61c9a8-#9b59b6-#ffffff".split("-");
 const PAL_ACCENT_ACTIVE = "#00d2ff-#d81159-#f52f57-#61c9a8-#9b59b6".split("-");
 const PAL_TRACE = "#c4b5e0-#a8d8ea-#d4c5f9-#bfe9da-#9b59b6-#61c9a8-#00d2ff-#d81159-#f52f57".split("-");
 const PAL_GLOW = "#d4c5f9-#bfe9da-#00d2ff-#d81159-#f52f57".split("-");
-const PAL_ATMO = "#d2b7f2-#b8c4fb-#9ddcf3-#98d8c0-#d79ce9-#a8d6f4".split("-");
+
 
 const URL_SEED = new URLSearchParams(window.location.search).get("seed");
 const SEED = URL_SEED !== null && Number.isFinite(Number(URL_SEED))
@@ -103,7 +103,7 @@ const FRAG_SRC = `
   }
 `;
 
-let canvasRef, bgLayer, atmoLayer, zoneLayer, structLayer, pulseLayer, paintLayer, compLayer, grainLayer, shaderLayer;
+let canvasRef, bgLayer, zoneLayer, structLayer, pulseLayer, paintLayer, compLayer, grainLayer, shaderLayer;
 let posterShader, sceneConfig, zones = [];
 let dragonX = W * 0.5, dragonY = H * 0.5, lastDX = dragonX, lastDY = dragonY;
 let heading = 0, speed = 0, turn = 0, energy = 0;
@@ -113,7 +113,6 @@ function setup() {
   canvasRef = createCanvas(W, H);
   frameRate(60); noSmooth();
   bgLayer = createGraphics(W, H);
-  atmoLayer = createGraphics(W, H);
   zoneLayer = createGraphics(W, H);
   structLayer = createGraphics(W, H);
   pulseLayer = createGraphics(W, H);
@@ -129,7 +128,7 @@ function setup() {
   sceneConfig = generateScene();
   zones = sceneConfig.reactiveZones;
   buildBackground(); buildStructure(); buildGrain();
-  atmoLayer.clear(); zoneLayer.clear(); pulseLayer.clear(); paintLayer.clear(); compLayer.clear();
+  zoneLayer.clear(); pulseLayer.clear(); paintLayer.clear(); compLayer.clear();
   fitCanvas();
   console.info("Dragon Brush seed:", SEED);
 }
@@ -138,10 +137,8 @@ function draw() {
   updateDragon();
   updateZones();
   renderZones();
-  fadeAlpha(atmoLayer, 2);
   fadeAlpha(pulseLayer, 14);
   fadeAlpha(paintLayer, 5);
-  paintAtmosphere();
   paintPulses();
   paintTrail();
   compose();
@@ -178,44 +175,11 @@ function fadeAlpha(layer, amt) {
   layer.drawingContext.restore(); layer.pop();
 }
 
-function pickPal(pal, s) { return pal[min(pal.length - 1, floor(noise(s) * pal.length))]; }
-
 function ss(e0, e1, x) { let t = constrain((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); }
 
 function zoneInf(x, y, cx, cy, rx, ry) {
   let dx = (x - cx) / rx, dy = (y - cy) / ry;
   return constrain(1 - sqrt(dx * dx + dy * dy), 0, 1);
-}
-
-function paintAtmosphere() {
-  let na = heading + HALF_PI, e = constrain(energy, 0, 1);
-  let wl = map(e, 0, 1, 120, 280), ww = map(e, 0, 1, 72, 180);
-  atmoLayer.push(); atmoLayer.rectMode(CENTER); atmoLayer.noStroke();
-  atmoLayer.blendMode(BLEND); atmoLayer.drawingContext.filter = "blur(12px)";
-  for (let i = 0; i < 5; i++) {
-    let to = i * random(20, 42), lat = randomGaussian() * ww * 0.16;
-    let px = dragonX - cos(heading) * to + cos(na) * lat;
-    let py = dragonY - sin(heading) * to + sin(na) * lat;
-    let g = color(pickPal(PAL_ATMO, frameCount * 0.018 + i * 0.37 + energy * 3));
-    g.setAlpha(random(6, 12) + e * 10); atmoLayer.fill(g);
-    atmoLayer.ellipse(px, py, wl * random(0.5, 1.05), ww * random(0.35, 0.85));
-  }
-  let rib = color(pickPal(PAL_ATMO, frameCount * 0.013 + 12 + heading * 0.3));
-  rib.setAlpha(8 + e * 12); atmoLayer.fill(rib);
-  atmoLayer.translate(dragonX - cos(heading) * wl * 0.18, dragonY - sin(heading) * wl * 0.18);
-  atmoLayer.rotate(heading + random(-0.16, 0.16));
-  atmoLayer.rect(0, 0, wl * 1.25, ww * 0.22, ww * 0.16);
-  atmoLayer.drawingContext.filter = "blur(0px)"; atmoLayer.blendMode(BLEND); atmoLayer.pop();
-  if (energy > 0.24) {
-    atmoLayer.push(); atmoLayer.blendMode(BLEND);
-    atmoLayer.strokeWeight(map(energy, 0, 1, 0.45, 0.9));
-    let st = color(pickPal(PAL_ACCENT_ACTIVE, frameCount * 0.022 + 28 + heading * 0.6));
-    st.setAlpha(12 + energy * 18); atmoLayer.stroke(st);
-    let r = map(energy, 0, 1, 60, 180);
-    atmoLayer.line(dragonX - cos(heading) * r, dragonY - sin(heading) * r,
-      dragonX + cos(heading) * r * 0.8, dragonY + sin(heading) * r * 0.8);
-    atmoLayer.pop();
-  }
 }
 
 function paintPulses() {
@@ -357,19 +321,12 @@ function paintTrail() {
 }
 
 function compose() {
-  let C = compLayer, A = atmoLayer, S = structLayer, P = paintLayer, Z = zoneLayer, PL = pulseLayer;
+  let C = compLayer, S = structLayer, P = paintLayer, Z = zoneLayer, PL = pulseLayer;
   C.push(); C.clear(); C.image(bgLayer, 0, 0);
-  C.blendMode(BLEND); C.drawingContext.globalAlpha = 0.9; C.image(A, 0, 0);
-  C.blendMode(SCREEN); C.drawingContext.globalAlpha = 0.1;
-  C.drawingContext.filter = "blur(18px)"; C.image(A, 0, 0);
-  C.drawingContext.filter = "blur(0px)";
   C.blendMode(BLEND); C.drawingContext.globalAlpha = 1;
   C.image(Z, 0, 0); C.image(S, 0, 0);
   C.blendMode(SCREEN); C.drawingContext.globalAlpha = 0.7; C.image(PL, 0, 0);
   C.blendMode(BLEND); C.drawingContext.globalAlpha = 1; C.image(P, 0, 0);
-  C.blendMode(SCREEN); C.drawingContext.globalAlpha = 0.12;
-  C.drawingContext.filter = "blur(6px)"; C.image(P, 0, 0);
-  C.drawingContext.filter = "blur(0px)";
   C.blendMode(MULTIPLY); C.drawingContext.globalAlpha = 0.34; C.image(S, 0, 0);
   C.drawingContext.globalAlpha = 0.36; C.image(P, 0, 0);
   C.blendMode(SCREEN); C.drawingContext.globalAlpha = 0.56; C.image(P, 0, 0);
