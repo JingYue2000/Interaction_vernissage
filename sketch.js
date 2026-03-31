@@ -283,38 +283,26 @@ function drawZoneBase(g, z) {
 function paintTrail() {
   let ang = atan2(dragonY - lastDY, dragonX - lastDX), na = ang + HALF_PI;
   let bs = map(sin(frameCount / 11), -1, 1, 34, 92), mc = floor(random(14, 24));
-  paintLayer.push(); paintLayer.rectMode(CENTER);
-  paintLayer.strokeCap(SQUARE); paintLayer.strokeJoin(ROUND);
-  paintLayer.drawingContext.shadowColor = "rgba(196,181,224,0.04)";
-  paintLayer.drawingContext.shadowBlur = 3;
+  paintLayer.push(); paintLayer.strokeJoin(ROUND); paintLayer.strokeCap(SQUARE);
   for (let i = 0; i < mc; i++) {
     let lat = randomGaussian() * bs * 0.36, fwd = random(-bs * 0.35, bs * 0.35);
     let px = dragonX + cos(na) * lat + cos(ang) * fwd;
     let py = dragonY + sin(na) * lat + sin(ang) * fwd;
-    let rot = ang + random(-0.85, 0.85), pick = random();
-    let accent = random() < 0.38;
-    let tone = color(random(accent ? PAL_ACCENT_ACTIVE : PAL_TRACE));
-    tone.setAlpha(random(118, 228));
-    let gl = color(random(PAL_GLOW)); gl.setAlpha(18);
-    paintLayer.push(); paintLayer.translate(px, py); paintLayer.rotate(rot);
-    paintLayer.drawingContext.shadowColor = gl.toString();
-    if (pick < 0.35) {
-      paintLayer.noStroke(); paintLayer.fill(tone);
-      paintLayer.rect(0, 0, random(8, 30), random(4, 14), random(4, 14) * 0.9);
-    } else if (pick < 0.58) {
-      paintLayer.noFill(); paintLayer.stroke(tone); paintLayer.strokeWeight(random(1.1, 2.6));
-      let len = random(16, 44); paintLayer.line(-len * 0.5, 0, len * 0.5, 0);
-      if (random() < 0.35) { paintLayer.strokeWeight(1); paintLayer.line(len * 0.18, -5, len * 0.18, 5); }
-    } else if (pick < 0.8) {
-      paintLayer.noStroke(); paintLayer.fill(tone); paintLayer.circle(0, 0, random(4, 12));
-      if (random() < 0.12) {
-        let dt = color(random(PAL_GLOW)); dt.setAlpha(22); paintLayer.fill(dt);
-        paintLayer.circle(random(-10, 10), random(-10, 10), random(1.4, 2.8));
-      }
-    } else {
-      paintLayer.noFill(); paintLayer.stroke(tone); paintLayer.strokeWeight(random(1, 2));
-      drawBracket(paintLayer, 0, 0, random(14, 28), random(12, 24));
+    let rot = ang + random(-0.85, 0.85), sz = random(5, 20);
+    let nv = floor(random(3, 6)), pts = [];
+    for (let j = 0; j < nv; j++) {
+      let a = TWO_PI * j / nv + random(-0.4, 0.4);
+      pts.push({ x: cos(a) * sz * random(0.4, 1), y: sin(a) * sz * random(0.4, 1) });
     }
+    let base = color(random(random() < 0.38 ? PAL_ACCENT_ACTIVE : PAL_TRACE));
+    let tintC = color(random(PAL_GLOW));
+    let act = random(0.2, 0.8);
+    let ft = lerpColor(base, tintC, 0.18 + act * 0.12); ft.setAlpha(random(60, 170));
+    let st = lerpColor(base, tintC, 0.48); st.setAlpha(random(22, 64));
+    paintLayer.push(); paintLayer.translate(px, py); paintLayer.rotate(rot);
+    paintLayer.noStroke(); paintLayer.fill(ft); drawPoly(paintLayer, pts);
+    paintLayer.noFill(); paintLayer.stroke(st); paintLayer.strokeWeight(0.35 + act * 0.9);
+    drawPoly(paintLayer, pts);
     paintLayer.pop();
   }
   paintLayer.pop();
