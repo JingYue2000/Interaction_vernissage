@@ -80,12 +80,12 @@ const FRAG_SRC = `
     heading = normalize(heading);
     float energy = clamp(uEnergy, 0.0, 1.0);
     float wake = cnoise(vec3(uv * vec2(5.0, 11.0) + heading * uTime * 0.45, uTime * 0.2));
-    vec2 flowWarp = heading * wake * (0.004 + energy * 0.012);
+    vec2 flowWarp = heading * wake * (0.002 + energy * 0.005);
     vec2 uvBase = clamp(uv + flowWarp, 0.0, 1.0);
     float drift = cnoise(vec3(uvBase * vec2(8.0, 16.0), uTime * 0.22));
-    float scan = sin((uv.y * uResolution.y * 0.18) + uTime * 2.0) * 0.5 + 0.5;
-    float splitStr = uSplit * (1.0 + energy * 1.9);
-    float jitStr = uJitter * (1.0 + energy * 1.4);
+    float scan = sin((uv.y * uResolution.y * 0.18) + uTime * 0.5) * 0.5 + 0.5;
+    float splitStr = uSplit * (1.0 + energy * 0.6);
+    float jitStr = uJitter * (1.0 + energy * 0.4);
     vec2 sOff = vec2((drift * 0.65 + (scan - 0.5) * 0.3) * splitStr, 0.0);
     vec2 jOff = vec2(0.0, (rand(uvBase + fract(uTime * 0.11)) - 0.5) * jitStr);
     vec3 col;
@@ -95,8 +95,8 @@ const FRAG_SRC = `
     col += uBrightness;
     col = ((col - 0.5) * uContrast) + 0.5;
     col = pow(max(col, 0.0), uCurve);
-    col += drift * (0.015 + energy * 0.02) * vec3(0.8, 1.0, 1.1);
-    col += energy * 0.018 * vec3(0.06, 0.02, 0.09);
+    col += drift * (0.008 + energy * 0.008) * vec3(0.8, 1.0, 1.1);
+    col += energy * 0.008 * vec3(0.06, 0.02, 0.09);
     float vig = smoothstep(0.18, 0.95, length((uv - 0.5) * vec2(0.9, 1.08)));
     col *= mix(1.02, 0.96, vig);
     gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
@@ -164,9 +164,10 @@ function updateDragon() {
   speed = dist(dragonX, dragonY, lastDX, lastDY);
   turn = abs(atan2(sin(nextH - heading), cos(nextH - heading)));
   heading = nextH;
-  let se = constrain(map(speed, 0.2, 12, 0.04, 1), 0, 1);
-  let te = constrain(map(turn, 0.01, 0.3, 0, 1), 0, 1);
-  energy = lerp(energy, max(se * 0.8, se * 0.5 + te * 0.75), 0.16);
+  let se = constrain(map(speed, 0.2, 12, 0.0, 0.6), 0, 0.6);
+  let te = constrain(map(turn, 0.01, 0.3, 0, 0.4), 0, 0.4);
+  let target = max(se * 0.7, se * 0.4 + te * 0.5);
+  energy = lerp(energy, target, target > energy ? 0.12 : 0.04);
 }
 
 function fadeAlpha(layer, amt) {
@@ -384,8 +385,8 @@ function renderShader() {
   posterShader.setUniform("uBrightness", 0.02);
   posterShader.setUniform("uContrast", 1.08);
   posterShader.setUniform("uCurve", [0.98, 0.96, 1.02]);
-  posterShader.setUniform("uSplit", 0.0035);
-  posterShader.setUniform("uJitter", 0.0018);
+  posterShader.setUniform("uSplit", 0.0012);
+  posterShader.setUniform("uJitter", 0.0006);
   posterShader.setUniform("uEnergy", energy);
   posterShader.setUniform("uHeading", [cos(heading), sin(heading)]);
   shaderLayer.clear(); shaderLayer.push();
