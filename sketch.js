@@ -327,7 +327,7 @@ function mapHandPointToCanvas(point) {
   let videoH = inputState.video?.elt?.videoHeight || inputState.video?.height || HAND_VIDEO_H;
   return {
     x: constrain(map(point.x, 0, videoW, 0, W), 0, W),
-    y: constrain(map(point.y, 0, videoH, 0, H), 0, H),
+    y: constrain(map(point.y, 0, videoH, H, 0), 0, H),
   };
 }
 
