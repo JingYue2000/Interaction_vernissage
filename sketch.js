@@ -1,14 +1,41 @@
 const W = 720, H = 1020;
-const PAL_BASE = "#c4b5e0-#a8d8ea-#d4c5f9-#e8dff5-#bfe9da-#9b59b6-#61c9a8-#ffffff".split("-");
-const PAL_ACCENT = "#00d2ff-#d81159-#f52f57-#61c9a8-#9b59b6-#ffffff".split("-");
-const PAL_ACCENT_ACTIVE = "#00d2ff-#d81159-#f52f57-#61c9a8-#9b59b6".split("-");
-const PAL_TRACE = "#c4b5e0-#a8d8ea-#d4c5f9-#bfe9da-#9b59b6-#61c9a8-#00d2ff-#d81159-#f52f57".split("-");
-const PAL_GLOW = "#d4c5f9-#bfe9da-#00d2ff-#d81159-#f52f57".split("-");
+const PAL_BASE = "#c4b5e0-#a8d8ea-#d4c5f9-#e8dff5-#9b59b6-#ffffff".split("-");
+const PAL_ACCENT = "#00d2ff-#d81159-#f52f57-#9b59b6-#ffffff".split("-");
+const PAL_ACCENT_ACTIVE = "#00d2ff-#d81159-#f52f57-#9b59b6".split("-");
+const PAL_TRACE = "#c4b5e0-#a8d8ea-#d4c5f9-#9b59b6-#00d2ff-#d81159-#f52f57".split("-");
+const PAL_GLOW = "#d4c5f9-#00d2ff-#d81159-#f52f57".split("-");
+const PAL_GLASS_FILL = PAL_TRACE.slice();
+const PAL_GLASS_TINT = PAL_ACCENT_ACTIVE.concat(["#a8d8ea", "#d4c5f9"]);
+const PAL_GLASS_RIM = PAL_GLOW.concat(["#00d2ff", "#c79bff"]);
 
 
 const URL_SEED = new URLSearchParams(window.location.search).get("seed");
 const SEED = URL_SEED !== null && Number.isFinite(Number(URL_SEED))
   ? Number(URL_SEED) : Math.floor(Math.random() * 1000000000);
+const ZONE_ATTACK = 0.18;
+const ZONE_RELEASE = 0.08;
+const SHARD_ATTACK = 0.20;
+const SHARD_RELEASE = 0.10;
+const REGROUP_BREAK_THRESHOLD = 0.24;
+const REGROUP_COMPLETE_THRESHOLD = 0.08;
+const REGROUP_COOLDOWN_FRAMES = 12;
+const COLOR_MORPH_DECAY = 0.085;
+const FLIP_SPEED = 0.085;
+const TRACE_BLEND_ALPHA = 1.0;
+const TRACE_SCREEN_ALPHA = 0.14;
+const TRACE_COUNT_MIN = 9;
+const TRACE_COUNT_MAX = 13;
+const TRACE_LIFE_MIN = 58;
+const TRACE_LIFE_MAX = 88;
+const HAND_VIDEO_W = 640;
+const HAND_VIDEO_H = 480;
+const HAND_TARGET_LERP = 0.18;
+const DRAGON_FOLLOW_LERP = 0.22;
+const HAND_GRACE_FRAMES = 12;
+const FALLBACK_BLEND_FRAMES = 18;
+const TRACE_SPEED_THRESHOLD = 1.2;
+const TRACE_SPEED_FULL = 12;
+const CAMERA_READY_TIMEOUT_MS = 4000;
 
 const FRAG_FUNCTIONS = `
   float rand(vec2 c){ return fract(sin(dot(c.xy, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -83,10 +110,9 @@ const FRAG_SRC = `
     vec2 flowWarp = heading * wake * (0.002 + energy * 0.005);
     vec2 uvBase = clamp(uv + flowWarp, 0.0, 1.0);
     float drift = cnoise(vec3(uvBase * vec2(8.0, 16.0), uTime * 0.22));
-    float scan = sin((uv.y * uResolution.y * 0.18) + uTime * 0.5) * 0.5 + 0.5;
     float splitStr = uSplit * (1.0 + energy * 0.6);
     float jitStr = uJitter * (1.0 + energy * 0.4);
-    vec2 sOff = vec2((drift * 0.65 + (scan - 0.5) * 0.3) * splitStr, 0.0);
+    vec2 sOff = vec2(drift * 0.65 * splitStr, 0.0);
     vec2 jOff = vec2(0.0, (rand(uvBase + fract(uTime * 0.11)) - 0.5) * jitStr);
     vec3 col;
     col.r = texture2D(uTex, clamp(uvBase + sOff + jOff, 0.0, 1.0)).r;
@@ -103,42 +129,65 @@ const FRAG_SRC = `
   }
 `;
 
-let canvasRef, bgLayer, zoneLayer, structLayer, pulseLayer, paintLayer, compLayer, grainLayer, shaderLayer;
+let canvasRef, bgLayer, zoneLayer, pulseLayer, paintLayer, compLayer, grainLayer, shaderLayer;
 let posterShader, sceneConfig, zones = [];
 let dragonX = W * 0.5, dragonY = H * 0.5, lastDX = dragonX, lastDY = dragonY;
 let heading = 0, speed = 0, turn = 0, energy = 0;
+let trailParticles = [];
+let inputState = {
+  video: null,
+  handPose: null,
+  hands: [],
+  cameraReady: false,
+  modelReady: false,
+  controlSource: "auto",
+  rawHandTarget: null,
+  filteredHandTarget: null,
+  lastSeenFrame: -1000,
+  fallbackBlend: 1,
+  detecting: false,
+  cameraTimeoutId: null,
+};
 
 function setup() {
   pixelDensity(min(window.devicePixelRatio || 1, 2));
   canvasRef = createCanvas(W, H);
-  frameRate(60); noSmooth();
+  frameRate(60); smooth();
   bgLayer = createGraphics(W, H);
   zoneLayer = createGraphics(W, H);
-  structLayer = createGraphics(W, H);
   pulseLayer = createGraphics(W, H);
   paintLayer = createGraphics(W, H);
   compLayer = createGraphics(W, H);
   grainLayer = createGraphics(W, H);
   shaderLayer = createGraphics(W, H, WEBGL);
+  bgLayer.smooth();
+  zoneLayer.smooth();
+  pulseLayer.smooth();
+  paintLayer.smooth();
+  compLayer.smooth();
+  grainLayer.smooth();
   shaderLayer.noStroke();
+  canvasRef.elt.style.imageRendering = "auto";
   posterShader = shaderLayer.createShader
     ? shaderLayer.createShader(VERT_SRC, FRAG_SRC)
     : new p5.Shader(shaderLayer._renderer, VERT_SRC, FRAG_SRC);
   randomSeed(SEED); noiseSeed(SEED);
   sceneConfig = generateScene();
   zones = sceneConfig.reactiveZones;
-  buildBackground(); buildStructure(); buildGrain();
+  trailParticles = [];
+  buildBackground(); buildGrain();
   zoneLayer.clear(); pulseLayer.clear(); paintLayer.clear(); compLayer.clear();
   fitCanvas();
+  setupHandTracking();
   console.info("Dragon Brush seed:", SEED);
 }
 
 function draw() {
   updateDragon();
   updateZones();
+  updateBgFrags();
   renderZones();
   fadeAlpha(pulseLayer, 14);
-  fadeAlpha(paintLayer, 5);
   paintPulses();
   paintTrail();
   compose();
@@ -150,14 +199,150 @@ function draw() {
 }
 
 function updateDragon() {
-  lastDX = dragonX; lastDY = dragonY;
+  let target = updateInputTarget();
+  updateDragonKinematics(target.x, target.y);
+}
+
+function setupHandTracking() {
+  if (typeof ml5 === "undefined") {
+    console.warn("ml5 is unavailable; continuing with auto trace.");
+    return;
+  }
+
+  let markCameraReady = () => {
+    if (inputState.cameraReady) return;
+    inputState.cameraReady = true;
+    if (inputState.cameraTimeoutId !== null) {
+      window.clearTimeout(inputState.cameraTimeoutId);
+      inputState.cameraTimeoutId = null;
+    }
+    startHandDetectionIfReady();
+  };
+
+  try {
+    inputState.video = createCapture({
+      audio: false,
+      video: {
+        facingMode: "user",
+        width: { ideal: HAND_VIDEO_W },
+        height: { ideal: HAND_VIDEO_H },
+      },
+    }, markCameraReady);
+    inputState.video.size(HAND_VIDEO_W, HAND_VIDEO_H);
+    inputState.video.hide();
+    inputState.video.elt.setAttribute("playsinline", "");
+    inputState.video.elt.muted = true;
+    inputState.video.elt.onloadedmetadata = markCameraReady;
+    inputState.cameraTimeoutId = window.setTimeout(() => {
+      if (!inputState.cameraReady) {
+        console.warn("Camera was not granted or did not become ready; continuing with auto trace.");
+      }
+    }, CAMERA_READY_TIMEOUT_MS);
+  } catch (error) {
+    console.warn("Camera setup failed; continuing with auto trace.", error);
+    inputState.video = null;
+  }
+
+  try {
+    inputState.handPose = ml5.handPose({ maxHands: 1, flipped: true }, () => {
+      inputState.modelReady = true;
+      startHandDetectionIfReady();
+    });
+    if (inputState.handPose?.ready?.catch) {
+      inputState.handPose.ready.catch((error) => {
+        console.warn("HandPose model failed to load; continuing with auto trace.", error);
+      });
+    }
+  } catch (error) {
+    console.warn("HandPose setup failed; continuing with auto trace.", error);
+    inputState.handPose = null;
+  }
+}
+
+function startHandDetectionIfReady() {
+  if (!inputState.handPose || !inputState.video || inputState.detecting) return;
+  if (!inputState.cameraReady || !inputState.modelReady) return;
+  try {
+    inputState.handPose.detectStart(inputState.video, gotHands);
+    inputState.detecting = true;
+  } catch (error) {
+    console.warn("HandPose detection could not start; continuing with auto trace.", error);
+  }
+}
+
+function gotHands(results) {
+  inputState.hands = Array.isArray(results) ? results : [];
+}
+
+function getAutoTarget() {
   let ph = noise(frameCount / 50);
-  let tx = cos(frameCount / 30 + ph) * W * 0.34 + W * 0.5;
-  let ty = sin(frameCount / 50 + ph) * H * 0.32 + H * 0.5;
-  dragonX = lerp(dragonX, tx, 0.26);
-  dragonY = lerp(dragonY, ty, 0.26);
+  return {
+    x: cos(frameCount / 30 + ph) * W * 0.34 + W * 0.5,
+    y: sin(frameCount / 50 + ph) * H * 0.32 + H * 0.5,
+  };
+}
+
+function updateInputTarget() {
+  let autoTarget = getAutoTarget();
+  let handAvailable = updateHandTarget();
+  let targetBlend = handAvailable ? 0 : 1;
+  inputState.fallbackBlend = moveTowards(
+    inputState.fallbackBlend,
+    targetBlend,
+    1 / FALLBACK_BLEND_FRAMES
+  );
+  inputState.controlSource = inputState.fallbackBlend < 0.5 ? "hand" : "auto";
+
+  if (!inputState.filteredHandTarget) return autoTarget;
+
+  return {
+    x: lerp(inputState.filteredHandTarget.x, autoTarget.x, inputState.fallbackBlend),
+    y: lerp(inputState.filteredHandTarget.y, autoTarget.y, inputState.fallbackBlend),
+  };
+}
+
+function updateHandTarget() {
+  let finger = inputState.hands[0]?.index_finger_tip;
+  if (finger) {
+    let rawTarget = mapHandPointToCanvas(finger);
+    let isStale = frameCount - inputState.lastSeenFrame > HAND_GRACE_FRAMES;
+    inputState.rawHandTarget = rawTarget;
+    if (!inputState.filteredHandTarget || isStale) {
+      inputState.filteredHandTarget = { ...rawTarget };
+    } else {
+      inputState.filteredHandTarget.x = lerp(inputState.filteredHandTarget.x, rawTarget.x, HAND_TARGET_LERP);
+      inputState.filteredHandTarget.y = lerp(inputState.filteredHandTarget.y, rawTarget.y, HAND_TARGET_LERP);
+    }
+    inputState.lastSeenFrame = frameCount;
+  } else {
+    inputState.rawHandTarget = null;
+  }
+
+  return inputState.filteredHandTarget !== null
+    && frameCount - inputState.lastSeenFrame <= HAND_GRACE_FRAMES;
+}
+
+function mapHandPointToCanvas(point) {
+  let videoW = inputState.video?.elt?.videoWidth || inputState.video?.width || HAND_VIDEO_W;
+  let videoH = inputState.video?.elt?.videoHeight || inputState.video?.height || HAND_VIDEO_H;
+  return {
+    x: constrain(map(point.x, 0, videoW, 0, W), 0, W),
+    y: constrain(map(point.y, 0, videoH, 0, H), 0, H),
+  };
+}
+
+function moveTowards(current, target, delta) {
+  if (abs(target - current) <= delta) return target;
+  return current + Math.sign(target - current) * delta;
+}
+
+function updateDragonKinematics(targetX, targetY) {
+  lastDX = dragonX; lastDY = dragonY;
+  dragonX = lerp(dragonX, targetX, DRAGON_FOLLOW_LERP);
+  dragonY = lerp(dragonY, targetY, DRAGON_FOLLOW_LERP);
   let dx = dragonX - lastDX, dy = dragonY - lastDY;
-  let nextH = atan2(dy, dx);
+  let nextH = heading;
+  if (abs(dx) > 0.0001 || abs(dy) > 0.0001) nextH = atan2(dy, dx);
   speed = dist(dragonX, dragonY, lastDX, lastDY);
   turn = abs(atan2(sin(nextH - heading), cos(nextH - heading)));
   heading = nextH;
@@ -177,6 +362,12 @@ function fadeAlpha(layer, amt) {
 
 function ss(e0, e1, x) { let t = constrain((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); }
 
+function approachReactive(current, target, rise, fall) {
+  let value = current ?? 0;
+  let rate = target > value ? rise : fall;
+  return lerp(value, target, rate);
+}
+
 function zoneInf(x, y, cx, cy, rx, ry) {
   let dx = (x - cx) / rx, dy = (y - cy) / ry;
   return constrain(1 - sqrt(dx * dx + dy * dy), 0, 1);
@@ -194,8 +385,9 @@ function paintPulses() {
 }
 
 function drawPulse(z, str) {
-  let ft = color(z.tint); ft.setAlpha(12 + str * 30);
-  let st = color(z.tint); st.setAlpha(8 + str * 18);
+  let palette = getZoneDisplayPalette(z);
+  let ft = color(palette.tint); ft.setAlpha(12 + str * 30);
+  let st = color(palette.tint); st.setAlpha(8 + str * 18);
   pulseLayer.push(); pulseLayer.noStroke(); pulseLayer.fill(ft);
   if (z.kind === "poly") {
     drawPoly(pulseLayer, z.points);
@@ -205,9 +397,6 @@ function drawPulse(z, str) {
     pulseLayer.rectMode(CORNER); pulseLayer.rect(z.x, z.y, z.w, z.h, z.r);
     pulseLayer.noFill(); pulseLayer.stroke(st); pulseLayer.strokeWeight(0.9 + str * 1.2);
     pulseLayer.rect(z.x, z.y, z.w, z.h, z.r);
-  } else if (z.kind === "target") {
-    pulseLayer.noFill(); pulseLayer.stroke(st); pulseLayer.strokeWeight(0.6 + str * 0.8);
-    drawTargetGlyph(pulseLayer, z.x, z.y, z.size + str * 8, z.tint, 14 + str * 38);
   }
   pulseLayer.pop();
 }
@@ -218,72 +407,214 @@ function updateZones() {
     let str = constrain(inf * (0.28 + energy * 1.05) + turn * 0.45, 0, 1);
     let fh = ss(0.14, 0.86, str);
     z.currentStrength = str;
-    z.glowLevel = max(z.glowLevel || 0, str);
-    z.fractureLevel = max(z.fractureLevel || 0, fh);
+    z.glowLevel = approachReactive(z.glowLevel, str, ZONE_ATTACK, ZONE_RELEASE);
+    z.fractureLevel = approachReactive(z.fractureLevel, fh, ZONE_ATTACK, ZONE_RELEASE);
     if (!z.shards) continue;
     for (let s of z.shards) {
       let hd = dist(dragonX, dragonY, s.centroid.x, s.centroid.y);
       let lr = max(z.radius[0], z.radius[1]) * 0.98;
       let hf = constrain(1 - hd / lr, 0, 1);
-      s.activation = max(s.activation || 0, fh * 0.72 + hf * 0.82 - s.threshold);
+      let target = max(0, fh * 0.72 + hf * 0.82 - s.threshold);
+      s.activation = approachReactive(s.activation, target, SHARD_ATTACK, SHARD_RELEASE);
     }
+    updateZoneRegroup(z);
+  }
+}
+
+function updateBgFrags() {
+  for (let z of sceneConfig.bgFrags) {
+    let inf = zoneInf(dragonX, dragonY, z.center[0], z.center[1], z.radius[0], z.radius[1]);
+    let str = constrain(inf * (0.3 + energy * 0.8), 0, 1);
+    let fh = ss(0.1, 0.9, str);
+    z.currentStrength = str;
+    z.glowLevel = approachReactive(z.glowLevel, str, ZONE_ATTACK, ZONE_RELEASE);
+    z.fractureLevel = approachReactive(z.fractureLevel, fh, ZONE_ATTACK, ZONE_RELEASE);
+    if (!z.shards) continue;
+    for (let s of z.shards) {
+      let hd = dist(dragonX, dragonY, s.centroid.x, s.centroid.y);
+      let lr = max(z.radius[0], z.radius[1]);
+      let hf = constrain(1 - hd / lr, 0, 1);
+      let target = max(0, fh * 0.72 + hf * 0.82 - s.threshold);
+      s.activation = approachReactive(s.activation, target, SHARD_ATTACK, SHARD_RELEASE);
+    }
+    updateZoneRegroup(z);
   }
 }
 
 function renderZones() {
   zoneLayer.clear(); zoneLayer.push();
   zoneLayer.strokeJoin(ROUND); zoneLayer.strokeCap(SQUARE);
+  for (let f of sceneConfig.bgFrags) drawZoneBase(zoneLayer, f);
   for (let p of sceneConfig.panels) drawZoneBase(zoneLayer, p);
-  for (let t of sceneConfig.targets) drawZoneBase(zoneLayer, t);
   zoneLayer.pop();
 }
 
+function drawZoneShape(g, z) {
+  if (z.kind === "poly") drawPoly(g, z.points);
+  else if (z.kind === "rect") { g.rectMode(CORNER); g.rect(z.x, z.y, z.w, z.h, z.r); }
+}
+
+function getZoneDisplayPalette(z) {
+  let fill = z.fill || z.baseColor || z.color || z.tint;
+  let tint = z.tint || fill;
+  let rim = z.rim || tint;
+  if ((z.regroupFlash || 0) > 0) {
+    if (z.flashFill) fill = mixHex(fill, z.flashFill, z.regroupFlash);
+    if (z.flashTint) tint = mixHex(tint, z.flashTint, z.regroupFlash);
+    if (z.flashRim) rim = mixHex(rim, z.flashRim, z.regroupFlash);
+  }
+  return { fill, tint, rim };
+}
+
+function getZoneMirrorScaleX(z) {
+  if (!z.flipAnimating) return z.mirrorX || 1;
+  return (z.flipStart || 1) * cos((z.flipT || 0) * PI);
+}
+
+function buildZoneRegroupMaterial(z) {
+  if (z.role === "panel") return buildPanelMaterial(sceneConfig.gradient, z.glassMode !== "ambient");
+  let base = z.fill || z.baseColor || random(PAL_TRACE);
+  let tint = mixHex(base, random(PAL_TRACE), random(0.28, 0.46));
+  let rim = mixHex(random(PAL_TRACE), random(PAL_GLOW), random(0.34, 0.62));
+  return {
+    fill: tint,
+    tint: rim,
+    rim: random(PAL_GLASS_RIM),
+    flashFill: mixHex(tint, random(PAL_ACCENT_ACTIVE), random(0.46, 0.72)),
+    flashTint: mixHex(rim, random(PAL_ACCENT_ACTIVE), random(0.4, 0.7)),
+    flashRim: random(PAL_GLOW),
+  };
+}
+
+function triggerZoneRegroup(z) {
+  let material = buildZoneRegroupMaterial(z);
+  z.fill = material.fill;
+  z.tint = material.tint;
+  z.rim = material.rim;
+  z.baseColor = material.fill;
+  if (material.glassMode) z.glassMode = material.glassMode;
+  z.flashFill = material.flashFill || material.fill;
+  z.flashTint = material.flashTint || material.tint;
+  z.flashRim = material.flashRim || material.rim;
+  z.regroupFlash = 1;
+  z.flipAnimating = true;
+  z.flipT = 0;
+  z.flipStart = z.mirrorX || 1;
+  z.flipTarget = -(z.mirrorX || 1);
+}
+
+function updateZoneRegroup(z) {
+  if (!z.shards || z.shards.length === 0) return;
+  z.regroupCooldown = max(0, (z.regroupCooldown || 0) - 1);
+  let fractureSignal = max(z.fractureLevel || 0, (z.currentStrength || 0) * 0.82);
+  if (fractureSignal > REGROUP_BREAK_THRESHOLD) z.wasFractured = true;
+  let prevFrac = z.prevFractureLevel || 0;
+  if (z.wasFractured
+    && prevFrac > REGROUP_COMPLETE_THRESHOLD
+    && z.fractureLevel <= REGROUP_COMPLETE_THRESHOLD
+    && (z.regroupCooldown || 0) <= 0) {
+    triggerZoneRegroup(z);
+    z.wasFractured = false;
+    z.regroupCooldown = REGROUP_COOLDOWN_FRAMES;
+  }
+  if (z.flipAnimating) {
+    z.flipT = min(1, (z.flipT || 0) + FLIP_SPEED);
+    if (z.flipT >= 1) {
+      z.flipAnimating = false;
+      z.mirrorX = z.flipTarget || -(z.flipStart || 1);
+    }
+  }
+  if ((z.regroupFlash || 0) > 0) {
+    z.regroupFlash = max(0, z.regroupFlash - COLOR_MORPH_DECAY);
+    if (z.regroupFlash <= 0) {
+      z.regroupFlash = 0;
+      z.flashFill = null;
+      z.flashTint = null;
+      z.flashRim = null;
+    }
+  }
+  z.prevFractureLevel = z.fractureLevel;
+}
+
 function drawZoneBase(g, z) {
+  let isPanel = z.role === "panel";
+  let isAmbientGlass = z.glassMode === "ambient";
   let frac = z.fractureLevel || 0;
-  let fHex = z.baseColor || z.fill || z.color || z.tint;
-  let eHex = z.tint || fHex;
-  let iAlpha = (z.alpha || 88) * max(0, 1 - frac * 1.25);
+  let palette = getZoneDisplayPalette(z);
+  let fHex = palette.fill;
+  let eHex = palette.tint;
+  let rHex = palette.rim;
+  let baseAlpha = (z.alpha || 88) * (isPanel ? (isAmbientGlass ? 1.02 : 1.16) : 1.0);
+  let iAlpha = baseAlpha * max(0, 1 - frac * (isPanel ? (isAmbientGlass ? 1.22 : 1.34) : 1.25));
+  g.push();
+  let scaleX = getZoneMirrorScaleX(z);
+  g.translate(z.center[0], z.center[1]);
+  g.scale(scaleX, 1);
+  g.translate(-z.center[0], -z.center[1]);
   if (iAlpha > 6) {
-    let ft = color(fHex); ft.setAlpha(iAlpha);
+    let ft = isPanel
+      ? lerpColor(color(fHex), color(eHex), isAmbientGlass ? 0.12 : 0.22)
+      : color(fHex);
+    ft.setAlpha(iAlpha);
     g.push(); g.noStroke(); g.fill(ft);
-    if (z.kind === "poly") drawPoly(g, z.points);
-    else if (z.kind === "rect") { g.rectMode(CORNER); g.rect(z.x, z.y, z.w, z.h, z.r); }
-    else if (z.kind === "target") {
-      let tf = color(fHex); tf.setAlpha(max(0, iAlpha * 0.18));
-      g.fill(tf); g.circle(z.x, z.y, z.size * 0.92); g.noFill();
-      drawTargetGlyph(g, z.x, z.y, z.size, eHex, iAlpha);
+    drawZoneShape(g, z);
+    if (isPanel) {
+      let glaze = lerpColor(color(fHex), color(eHex), isAmbientGlass ? 0.48 : 0.74);
+      glaze.setAlpha((isAmbientGlass ? 6 : 10) + iAlpha * (isAmbientGlass ? 0.1 : 0.14));
+      g.fill(glaze);
+      drawZoneShape(g, z);
     }
     g.pop();
   }
-  if (z.kind !== "target") {
-    let et = color(eHex); et.setAlpha(max(14, iAlpha * 0.42));
-    g.push(); g.noFill(); g.stroke(et); g.strokeWeight(0.7);
-    if (z.kind === "poly") drawPoly(g, z.points);
-    else if (z.kind === "rect") { g.rectMode(CORNER); g.rect(z.x, z.y, z.w, z.h, z.r); }
+  let et = isPanel
+    ? lerpColor(color(fHex), color(eHex), isAmbientGlass ? 0.56 : 0.82)
+    : color(eHex);
+  et.setAlpha(max(isPanel ? (isAmbientGlass ? 18 : 32) : 14, iAlpha * (isPanel ? (isAmbientGlass ? 0.38 : 0.56) : 0.42)));
+  g.push(); g.noFill(); g.stroke(et); g.strokeWeight(isPanel ? (isAmbientGlass ? 0.85 : 1.15) : 0.7);
+  drawZoneShape(g, z);
+  if (isPanel) {
+    let depth = lerpColor(color(eHex), color("#4d3f76"), 0.68);
+    depth.setAlpha((isAmbientGlass ? 4 : 8) + iAlpha * (isAmbientGlass ? 0.08 : 0.14));
+    g.push(); g.translate(isAmbientGlass ? 2.4 : 3.2, isAmbientGlass ? 3.2 : 4.2); g.stroke(depth); g.strokeWeight(isAmbientGlass ? 0.65 : 0.85);
+    drawZoneShape(g, z);
+    g.pop();
+    let rim = lerpColor(color(eHex), color(rHex), 0.44);
+    rim.setAlpha((isAmbientGlass ? 5 : 9) + iAlpha * (isAmbientGlass ? 0.08 : 0.12));
+    g.push(); g.translate(isAmbientGlass ? -1.8 : -2.8, isAmbientGlass ? -2.6 : -3.8); g.stroke(rim); g.strokeWeight(isAmbientGlass ? 0.5 : 0.65);
+    drawZoneShape(g, z);
     g.pop();
   }
-  if (frac > 0.02 && z.shards && z.shards.length > 0) {
-    let bt = color(z.baseColor || z.fill || z.color || z.tint);
+  g.pop();
+  if (z.shards && z.shards.length > 0) {
+    let bt = color(fHex);
+    let shardTint = color(isPanel ? rHex : (z.tint || z.baseColor));
     for (let s of z.shards) {
-      let act = min(1, (s.activation || 0) * 0.9 + frac * 0.25);
-      if (act <= 0) continue;
-      let off = act * 22 * s.depth;
-      let st = lerpColor(bt, color(z.tint || z.baseColor), 0.18 + act * 0.12);
-      st.setAlpha(60 + act * 110);
-      let ss2 = lerpColor(bt, color(z.tint || z.baseColor), 0.48);
-      ss2.setAlpha(22 + act * 42);
+      let act = constrain((s.activation || 0) * 0.78 + frac * 0.22, 0, 1);
+      if (act <= 0.01) continue;
+      let off = act * (isPanel ? (isAmbientGlass ? 28 : 34) : 24) * (0.55 + s.depth * 0.95);
+      let st = lerpColor(bt, shardTint, isPanel ? (isAmbientGlass ? 0.28 + act * 0.18 : 0.42 + act * 0.24) : 0.24 + act * 0.16);
+      st.setAlpha((isPanel ? (isAmbientGlass ? 56 : 78) : 60) + act * (isPanel ? (isAmbientGlass ? 102 : 138) : 110));
+      let ss2 = lerpColor(shardTint, color(z.tint || z.baseColor), 0.36);
+      ss2.setAlpha((isPanel ? (isAmbientGlass ? 20 : 32) : 22) + act * (isPanel ? (isAmbientGlass ? 42 : 64) : 42));
+      let shadow = lerpColor(color("#4d3f76"), shardTint, 0.18);
+      shadow.setAlpha((isAmbientGlass ? 5 : 8) + act * (isAmbientGlass ? 18 : 28));
       g.push(); g.translate(s.dir.x * off, s.dir.y * off);
+      if (isPanel) {
+        g.push(); g.translate(s.dir.x * (2 + act * 3.5), s.dir.y * (2 + act * 3.5));
+        g.noStroke(); g.fill(shadow); drawPoly(g, s.points);
+        g.pop();
+      }
       g.noStroke(); g.fill(st); drawPoly(g, s.points);
       g.noFill(); g.stroke(ss2); g.strokeWeight(0.35 + act * 0.9); drawPoly(g, s.points);
       g.pop();
     }
   }
+  g.pop();
 }
 
 function paintTrail() {
   let ang = atan2(dragonY - lastDY, dragonX - lastDX), na = ang + HALF_PI;
-  let bs = map(sin(frameCount / 11), -1, 1, 34, 92), mc = floor(random(14, 24));
-  paintLayer.push(); paintLayer.strokeJoin(ROUND); paintLayer.strokeCap(SQUARE);
+  let bs = map(sin(frameCount / 11), -1, 1, 34, 92), mc = floor(random(TRACE_COUNT_MIN, TRACE_COUNT_MAX));
   for (let i = 0; i < mc; i++) {
     let lat = randomGaussian() * bs * 0.36, fwd = random(-bs * 0.35, bs * 0.35);
     let px = dragonX + cos(na) * lat + cos(ang) * fwd;
@@ -297,28 +628,53 @@ function paintTrail() {
     let base = color(random(random() < 0.38 ? PAL_ACCENT_ACTIVE : PAL_TRACE));
     let tintC = color(random(PAL_GLOW));
     let act = random(0.2, 0.8);
-    let ft = lerpColor(base, tintC, 0.18 + act * 0.12); ft.setAlpha(random(60, 170));
-    let st = lerpColor(base, tintC, 0.48); st.setAlpha(random(22, 64));
-    paintLayer.push(); paintLayer.translate(px, py); paintLayer.rotate(rot);
-    paintLayer.noStroke(); paintLayer.fill(ft); drawPoly(paintLayer, pts);
-    paintLayer.noFill(); paintLayer.stroke(st); paintLayer.strokeWeight(0.35 + act * 0.9);
-    drawPoly(paintLayer, pts);
+    let ft = lerpColor(base, tintC, 0.18 + act * 0.12);
+    let st = lerpColor(base, tintC, 0.48);
+    trailParticles.push({
+      x: px,
+      y: py,
+      rot,
+      pts,
+      strokeWeight: 0.35 + act * 0.9,
+      maxAge: floor(random(TRACE_LIFE_MIN, TRACE_LIFE_MAX)),
+      age: 0,
+      fillRgb: [red(ft), green(ft), blue(ft)],
+      strokeRgb: [red(st), green(st), blue(st)],
+      fillAlpha: random(78, 156),
+      strokeAlpha: random(24, 62),
+    });
+  }
+  let alive = [];
+  paintLayer.clear();
+  paintLayer.push(); paintLayer.strokeJoin(ROUND); paintLayer.strokeCap(SQUARE);
+  for (let p of trailParticles) {
+    let life = 1 - (p.age / p.maxAge);
+    if (life <= 0) continue;
+    let fade = life * life * (3 - 2 * life);
+    let ft = color(p.fillRgb[0], p.fillRgb[1], p.fillRgb[2]);
+    let st = color(p.strokeRgb[0], p.strokeRgb[1], p.strokeRgb[2]);
+    ft.setAlpha(p.fillAlpha * fade);
+    st.setAlpha(p.strokeAlpha * fade);
+    paintLayer.push(); paintLayer.translate(p.x, p.y); paintLayer.rotate(p.rot);
+    paintLayer.noStroke(); paintLayer.fill(ft); drawPoly(paintLayer, p.pts);
+    paintLayer.noFill(); paintLayer.stroke(st); paintLayer.strokeWeight(p.strokeWeight);
+    drawPoly(paintLayer, p.pts);
     paintLayer.pop();
+    p.age += 1;
+    if (p.age < p.maxAge) alive.push(p);
   }
   paintLayer.pop();
+  trailParticles = alive;
 }
 
 function compose() {
-  let C = compLayer, S = structLayer, P = paintLayer, Z = zoneLayer, PL = pulseLayer;
+  let C = compLayer, P = paintLayer, Z = zoneLayer, PL = pulseLayer;
   C.push(); C.clear(); C.image(bgLayer, 0, 0);
-  C.blendMode(BLEND); C.drawingContext.globalAlpha = 1;
-  C.image(Z, 0, 0); C.image(S, 0, 0);
+  C.blendMode(BLEND); C.drawingContext.globalAlpha = 1; C.image(Z, 0, 0);
   C.blendMode(SCREEN); C.drawingContext.globalAlpha = 0.7; C.image(PL, 0, 0);
-  C.blendMode(BLEND); C.drawingContext.globalAlpha = 1; C.image(P, 0, 0);
-  C.blendMode(MULTIPLY); C.drawingContext.globalAlpha = 0.34; C.image(S, 0, 0);
-  C.drawingContext.globalAlpha = 0.36; C.image(P, 0, 0);
-  C.blendMode(SCREEN); C.drawingContext.globalAlpha = 0.56; C.image(P, 0, 0);
-  C.blendMode(BLEND); C.drawingContext.filter = "blur(0px)"; C.drawingContext.globalAlpha = 1;
+  C.blendMode(BLEND); C.drawingContext.globalAlpha = TRACE_BLEND_ALPHA; C.image(P, 0, 0);
+  C.blendMode(SCREEN); C.drawingContext.globalAlpha = TRACE_SCREEN_ALPHA; C.image(P, 0, 0);
+  C.blendMode(BLEND); C.drawingContext.globalAlpha = 1;
   C.pop();
 }
 
@@ -348,104 +704,127 @@ function generateScene() {
       mid: random(["#cbb8ee", "#c7b2f1", "#d3c0f3", "#c6b6ea"]),
       bottom: random(["#c7e4f5", "#c9ebfb", "#bee3f2", "#d2effc"]),
     },
-    hazes: [], bands: [], panels: [], outlines: [], guides: [],
-    targets: [], brackets: [], hatches: [], reactiveZones: [],
-    microGlyphCount: floor(random(96, 162)),
+    bgFrags: [], panels: [], targets: [], reactiveZones: [],
   };
-  for (let i = 0; i < 4; i++) cfg.hazes.push({
-    x: random(0.08, 0.92) * W, y: random(0.1, 0.9) * H,
-    w: random(280, 760), h: random(180, 860),
-    color: random(["#efe4ff", "#d6d0ff", "#caebff", "#c8f1e3", "#dbcaff"]), alpha: random(28, 94),
-  });
-  for (let i = 0, n = floor(random(2, 4)); i < n; i++) cfg.bands.push({
-    x: random(-40, 120), y: random(0.18, 0.94) * H,
-    w: random(0.42, 1.04) * W, h: random(8, 22),
-    color: random(["#d8c9ff", "#cfe7ff", "#ffffff", "#f0d2ff"]), alpha: random(18, 36),
-  });
-
-  let lp = mkZone("poly", {
-    points: [[0, random(0.47, 0.58)], [random(0.54, 0.66), random(0.31, 0.39)], [random(0.57, 0.69), 1], [0, 1]],
-    fill: random(["#cbbff0", "#c5b2ff", "#bda6ef"]), alpha: random(108, 142),
-    tint: random(["#bc94ff", "#d58fff", "#9eeaff"]),
-    guide: { x1: random(0.04, 0.14) * W, y1: random(0.58, 0.7) * H, x2: random(0.82, 0.94) * W, y2: random(0.16, 0.26) * H },
-  });
-  cfg.panels.push(lp); cfg.guides.push(lp.guide); cfg.reactiveZones.push(lp);
-
-  let ts = mkZone("poly", {
-    points: [[random(0.4, 0.54), random(0.12, 0.2)], [1, random(0.08, 0.16)], [1, random(0.38, 0.48)], [random(0.55, 0.67), random(0.37, 0.47)]],
-    fill: random(["#e3daf9", "#e7ddff", "#dcd4fb"]), alpha: random(92, 122),
-    tint: random(["#d6c8ff", "#dbe7ff", "#a6e8ff"]),
-    guide: { x1: random(0.78, 0.96) * W, y1: 0, x2: random(0.18, 0.34) * W, y2: random(0.34, 0.46) * H },
-  });
-  cfg.panels.push(ts); cfg.guides.push(ts.guide); cfg.reactiveZones.push(ts);
-
-  let cx = random(0.22, 0.34) * W, cy = random(0.22, 0.3) * H;
-  let cw = random(210, 272), ch = random(370, 520), cr = random(14, 22);
-  let cp = mkZone("rect", {
-    x: cx, y: cy, w: cw, h: ch, r: cr,
-    fill: random(["#ab96ef", "#b392f2", "#a88de8"]), alpha: random(92, 118),
-    tint: random(["#d86cff", "#ff8df0", "#a9d7ff"]),
-    hatch: { x: cx + random(-10, 18), y: cy + random(36, 112), w: min(cw - random(6, 24), random(180, 260)),
-      h: random(10, 24), color: random(["#ff8df0", "#d562e4", "#9eeaff"]), spacing: random(22, 34) },
-  });
-  cfg.panels.push(cp); cfg.hatches.push(cp.hatch); cfg.reactiveZones.push(cp);
-
-  let lw = mkZone("poly", {
-    points: [[random(0.01, 0.08), random(0.08, 0.15)], [random(0.32, 0.43), random(0.06, 0.12)],
-      [random(0.17, 0.29), random(0.35, 0.46)], [random(-0.01, 0.04), random(0.33, 0.43)]],
-    fill: random(["#ede4fb", "#f0e9ff", "#e0dcff"]), alpha: random(44, 72),
-    tint: random(["#dbe7ff", "#cfe0ff", "#c0f7ff"]),
-    guide: { x1: random(0.12, 0.22) * W, y1: random(0.01, 0.05) * H, x2: random(0.38, 0.49) * W, y2: random(0.18, 0.28) * H },
-  });
-  cfg.panels.push(lw); cfg.guides.push(lw.guide); cfg.reactiveZones.push(lw);
-
-  if (random() < 0.78) cfg.panels.push(mkZone("rect", {
-    x: random(0.5, 0.72) * W, y: random(0.58, 0.82) * H,
-    w: random(88, 168), h: random(42, 96), r: random(12, 20),
-    fill: random(["#eef3ff", "#ece2ff", "#dff7ff"]), alpha: random(34, 58),
-    tint: random(["#d9e7ff", "#b7ebff", "#eec7ff"]),
-  }));
-
-  for (let i = 0, n = floor(random(5, 8)); i < n; i++) {
-    let a = random(cfg.panels), ow = random(88, 158), oh = random(38, 118);
-    cfg.outlines.push({
-      x: constrain(a.center[0] + random(-a.radius[0], a.radius[0]) - ow * 0.5, 16, W - ow - 16),
-      y: constrain(a.center[1] + random(-a.radius[1], a.radius[1]) - oh * 0.5, 16, H - oh - 16),
-      w: ow, h: oh, r: random(10, 18),
-      color: random(["#7e6dc2", "#ffffff", "#d974ff", "#b7ebff"]),
-      weight: random(1, 1.9), alpha: random(78, 154),
+  for (let i = 0, n = floor(random(24, 38)); i < n; i++) {
+    let sz = random(40, 180), nv = floor(random(3, 6));
+    let cx = random(0.02, 0.98) * W, cy = random(0.02, 0.98) * H;
+    let rot = random(-PI, PI), pts = [];
+    for (let j = 0; j < nv; j++) {
+      let a = TWO_PI * j / nv + random(-0.4, 0.4) + rot;
+      pts.push({ x: cx + cos(a) * sz * random(0.4, 1), y: cy + sin(a) * sz * random(0.4, 1) });
+    }
+    let col = random(["#efe4ff", "#d6d0ff", "#caebff", "#dbcaff", "#d8c9ff", "#cfe7ff", "#f0d2ff"]);
+    let z = { kind: "poly", role: "bgFrag", points: pts, center: [cx, cy], radius: [sz * 1.2, sz * 1.2],
+      baseColor: col, tint: col, alpha: random(18, 72) };
+    cfg.bgFrags.push(initZoneState(z));
+  }
+  let panelCount = floor(random(12, 18));
+  let largeCount = floor(random(4, 6));
+  let ambientCount = floor(random(max(4, panelCount * 0.4), panelCount * 0.65 + 1));
+  let panelAnchors = [];
+  for (let i = 0; i < panelCount; i++) {
+    let large = i < largeCount;
+    let ambient = i < ambientCount;
+    let panel = buildRandomPanel(panelAnchors, large, cfg.gradient, ambient);
+    cfg.panels.push(panel);
+    cfg.reactiveZones.push(panel);
+    panelAnchors.push({
+      x: panel.center[0],
+      y: panel.center[1],
+      rx: panel.radius[0],
+      ry: panel.radius[1],
     });
   }
-  for (let i = 0, n = floor(random(6, 9)); i < n; i++) {
-    let s = randEdge(), e = randEdge();
-    cfg.guides.push({ x1: s.x, y1: s.y, x2: e.x, y2: e.y,
-      color: random(["#8978e1", "#ffffff", "#61c9a8", "#d98dff"]),
-      alpha: random(52, 108), weight: random(0.7, 1.35) });
-  }
-  for (let i = 0, n = floor(random(3, 5)); i < n; i++) {
-    let a = random(cfg.panels), sz = random(14, 58);
-    let tx = constrain(a.center[0] + random(-a.radius[0] * 0.65, a.radius[0] * 0.65), 36, W - 36);
-    let ty = constrain(a.center[1] + random(-a.radius[1] * 0.65, a.radius[1] * 0.65), 36, H - 36);
-    let tgt = mkZone("target", {
-      x: tx, y: ty, size: sz,
-      color: random(["#dbb0ff", "#c3b4ff", "#61c9a8", "#9eeaff"]), alpha: random(88, 132),
-      tint: random(["#9eeaff", "#dba4ff", "#c8f0ff", "#61c9a8"]),
-    });
-    cfg.targets.push(tgt);
-    if (i < 3) cfg.reactiveZones.push(tgt);
-  }
-  for (let i = 0, n = floor(random(3, 6)); i < n; i++) cfg.brackets.push({
-    x: random(0.07, 0.92) * W, y: random(0.08, 0.92) * H,
-    w: random(14, 26), h: random(11, 20),
-    color: random(["#ffffff", "#d8ccff", "#baf4ff"]), alpha: random(70, 130),
-  });
-  for (let i = 0, n = floor(random(1, 3)); i < n; i++) cfg.hatches.push({
-    x: random(0.08, 0.58) * W, y: random(0.16, 0.92) * H,
-    w: random(120, 260), h: random(8, 20),
-    color: random(["#ec6fd9", "#d562e4", "#9eeaff", "#ffffff"]),
-    weight: random(0.95, 1.25), spacing: random(18, 30),
-  });
+
   return cfg;
+}
+
+function buildRandomPanel(existingAnchors, large = false, gradient, ambient = false) {
+  let attempts = 28;
+  let best = null;
+  for (let i = 0; i < attempts; i++) {
+    let rx = large ? random(110, 228) : random(42, 136);
+    let ry = large ? random(138, 296) : random(54, 178);
+    let cx = random(0.04, 0.96) * W;
+    let cy = random(0.04, 0.96) * H;
+    let nv = floor(random(4, 8));
+    let rot = random(TWO_PI);
+    let pts = [];
+    for (let j = 0; j < nv; j++) {
+      let a = TWO_PI * j / nv + rot + random(-0.32, 0.32);
+      let px = cx + cos(a) * rx * random(0.52, 1.08);
+      let py = cy + sin(a) * ry * random(0.52, 1.08);
+      pts.push({
+        x: constrain(px, -W * 0.08, W * 1.08),
+        y: constrain(py, -H * 0.08, H * 1.08),
+      });
+    }
+    let separation = 999999;
+    for (let a of existingAnchors) {
+      let dx = (cx - a.x) / max(1, (rx + a.rx) * 0.72);
+      let dy = (cy - a.y) / max(1, (ry + a.ry) * 0.72);
+      separation = min(separation, sqrt(dx * dx + dy * dy));
+    }
+    let edgeBias = min(cx, W - cx, cy, H - cy) / min(W, H);
+    let score = separation + edgeBias * 0.22 + random(0.0, 0.16);
+    if (!best || score > best.score) best = { pts, score, large };
+  }
+  let bounds = getBounds(best.pts);
+  let areaNorm = ((bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY)) / (W * H);
+  let material = buildPanelMaterial(gradient, ambient);
+  let alphaBase = best.large
+    ? (ambient ? random(78, 116) : random(96, 132))
+    : (ambient ? random(46, 88) : random(60, 108));
+  let alphaBoost = constrain(map(areaNorm, 0.02, 0.22, 0, 18), 0, 18);
+  return mkZone("poly", {
+    role: "panel",
+    glassMode: material.glassMode,
+    points: best.pts.map(pt => [pt.x / W, pt.y / H]),
+    fill: material.fill,
+    alpha: alphaBase + alphaBoost,
+    tint: material.tint,
+    rim: material.rim,
+  });
+}
+
+function buildPanelMaterial(gradient, ambient = false) {
+  if (!ambient) {
+    return {
+      glassMode: "vivid",
+      fill: random(PAL_GLASS_FILL),
+      tint: random(PAL_GLASS_TINT),
+      rim: random(PAL_GLASS_RIM),
+    };
+  }
+  let g1 = random([gradient.top, gradient.mid, gradient.bottom]);
+  let g2 = random([gradient.top, gradient.mid, gradient.bottom]);
+  return {
+    glassMode: "ambient",
+    fill: mixHex(g1, g2, random(0.25, 0.7)),
+    tint: mixHex(g2, random(PAL_TRACE), random(0.14, 0.28)),
+    rim: mixHex(g1, random(PAL_GLOW), random(0.22, 0.4)),
+  };
+}
+
+function mixHex(a, b, t) {
+  return colorToHex(lerpColor(color(a), color(b), t));
+}
+
+function colorToHex(c) {
+  let col = color(c);
+  let toHex = v => hex(round(v), 2);
+  return `#${toHex(red(col))}${toHex(green(col))}${toHex(blue(col))}`;
+}
+
+function getBounds(pts) {
+  let xs = pts.map(pt => pt.x), ys = pts.map(pt => pt.y);
+  return {
+    minX: Math.min(...xs),
+    maxX: Math.max(...xs),
+    minY: Math.min(...ys),
+    maxY: Math.max(...ys),
+  };
 }
 
 function mkZone(kind, p) {
@@ -456,11 +835,6 @@ function mkZone(kind, p) {
     z.center = [(Math.min(...xs) + Math.max(...xs)) * 0.5, (Math.min(...ys) + Math.max(...ys)) * 0.5];
     z.radius = [Math.max((Math.max(...xs) - Math.min(...xs)) * 0.62, 96),
       Math.max((Math.max(...ys) - Math.min(...ys)) * 0.62, 86)];
-    if (z.guide) {
-      z.guide.color = z.guide.color || random(["#8978e1", "#ffffff", "#61c9a8", "#d98dff"]);
-      z.guide.alpha = z.guide.alpha || random(40, 92);
-      z.guide.weight = z.guide.weight || random(0.7, 1.35);
-    }
   } else if (kind === "rect") {
     z.center = [p.x + p.w * 0.5, p.y + p.h * 0.5];
     z.radius = [Math.max(p.w * 0.6, 82), Math.max(p.h * 0.52, 72)];
@@ -468,17 +842,30 @@ function mkZone(kind, p) {
     z.center = [p.x, p.y];
     z.radius = [p.size * 1.45, p.size * 1.45];
   }
+  return initZoneState(z);
+}
+
+
+function initZoneState(z) {
+  z.currentStrength = 0;
+  z.glowLevel = 0;
+  z.fractureLevel = 0;
+  z.prevFractureLevel = 0;
+  z.wasFractured = false;
+  z.regroupCooldown = 0;
+  z.regroupFlash = 0;
+  z.flashFill = null;
+  z.flashTint = null;
+  z.flashRim = null;
+  z.mirrorX = 1;
+  z.flipAnimating = false;
+  z.flipT = 0;
+  z.flipStart = 1;
+  z.flipTarget = -1;
   z.shards = buildShards(z);
   return z;
 }
 
-function randEdge() {
-  let e = floor(random(4));
-  if (e === 0) return { x: random(W), y: 0 };
-  if (e === 1) return { x: W, y: random(H) };
-  if (e === 2) return { x: random(W), y: H };
-  return { x: 0, y: random(H) };
-}
 
 function buildShards(z) {
   let perim = [];
@@ -506,6 +893,7 @@ function buildShards(z) {
       points: pts, centroid: { x: centX, y: centY },
       dir: { x: dx / mag, y: dy / mag }, depth: random(0.4, 1),
       threshold: i / perim.length + random(-0.08, 0.1), tint: random(PAL_GLOW),
+      activation: 0,
     });
   }
   return shards.sort((a, b) => a.threshold - b.threshold);
@@ -526,65 +914,16 @@ function sampleShape(pts, sub) {
 // --- Static Layer Builders ---
 
 function buildBackground() {
-  let top = color(sceneConfig.gradient.top), mid = color(sceneConfig.gradient.mid), bot = color(sceneConfig.gradient.bottom);
-  bgLayer.push(); bgLayer.clear(); bgLayer.noFill();
-  for (let y = 0; y < H; y++) {
-    let t = y / (H - 1);
-    let c = lerpColor(lerpColor(top, mid, min(t * 1.25, 1)), bot, ss(0.25, 1, t));
-    bgLayer.stroke(c); bgLayer.line(0, y, W, y);
-  }
-  bgLayer.noStroke();
-  for (let h of sceneConfig.hazes) {
-    let c = color(h.color); c.setAlpha(h.alpha); bgLayer.fill(c);
-    bgLayer.ellipse(h.x, h.y, h.w, h.h);
-  }
-  for (let b of sceneConfig.bands) {
-    let c = color(b.color); c.setAlpha(b.alpha); bgLayer.fill(c);
-    bgLayer.rect(b.x, b.y, b.w, b.h, b.h * 0.5);
-  }
+  bgLayer.push(); bgLayer.clear(); bgLayer.noStroke();
+  let grad = bgLayer.drawingContext.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0.0, sceneConfig.gradient.top);
+  grad.addColorStop(0.42, sceneConfig.gradient.mid);
+  grad.addColorStop(1.0, sceneConfig.gradient.bottom);
+  bgLayer.drawingContext.fillStyle = grad;
+  bgLayer.drawingContext.fillRect(0, 0, W, H);
   bgLayer.pop();
 }
 
-function buildStructure() {
-  structLayer.clear(); structLayer.push();
-  structLayer.noFill(); structLayer.strokeJoin(ROUND); structLayer.strokeCap(SQUARE);
-  for (let o of sceneConfig.outlines) {
-    let c = color(o.color); c.setAlpha(o.alpha);
-    structLayer.push(); structLayer.noFill(); structLayer.stroke(c);
-    structLayer.strokeWeight(o.weight); structLayer.rect(o.x, o.y, o.w, o.h, o.r); structLayer.pop();
-  }
-  for (let g of sceneConfig.guides) {
-    let c = color(g.color); c.setAlpha(min(255, g.alpha * 1.08));
-    structLayer.push(); structLayer.noFill(); structLayer.stroke(c);
-    structLayer.strokeWeight(g.weight); structLayer.line(g.x1, g.y1, g.x2, g.y2); structLayer.pop();
-  }
-  for (let b of sceneConfig.brackets) {
-    let c = color(b.color); c.setAlpha(b.alpha);
-    structLayer.stroke(c); structLayer.strokeWeight(1.05);
-    drawBracket(structLayer, b.x, b.y, b.w, b.h);
-  }
-  for (let h of sceneConfig.hatches) {
-    let c = color(h.color); c.setAlpha(90);
-    structLayer.push(); structLayer.noFill(); structLayer.stroke(c); structLayer.strokeWeight(h.weight);
-    for (let off = -h.h; off < h.w + h.h; off += h.spacing * 0.22)
-      structLayer.line(h.x + off, h.y + h.h, h.x + off + h.h, h.y);
-    structLayer.pop();
-  }
-  randomSeed(SEED + 202); noiseSeed(SEED + 202);
-  for (let i = 0; i < sceneConfig.microGlyphCount; i++) {
-    let px = random(18, W - 18), py = random(20, H - 20);
-    let c = color(random(random() < 0.18 ? PAL_ACCENT : PAL_BASE)); c.setAlpha(random(42, 118));
-    structLayer.push(); structLayer.translate(px, py); structLayer.rotate(random(-0.4, 0.4));
-    structLayer.stroke(c); structLayer.fill(c);
-    let m = floor(random(4));
-    if (m === 0) { structLayer.strokeWeight(0.9); structLayer.line(-4, 0, 4, 0); structLayer.line(0, -4, 0, 4); }
-    else if (m === 1) { structLayer.noStroke(); structLayer.circle(0, 0, random(1.4, 3.4)); }
-    else if (m === 2) { structLayer.noFill(); structLayer.strokeWeight(1); structLayer.rect(0, 0, random(4, 10), random(2, 6), 2); }
-    else { structLayer.strokeWeight(0.8); structLayer.line(-4, -2, 4, -2); structLayer.line(-4, 2, 4, 2); }
-    structLayer.pop();
-  }
-  structLayer.pop();
-}
 
 function buildGrain() {
   randomSeed(SEED + 777); noiseSeed(SEED + 777);
@@ -608,24 +947,6 @@ function drawPoly(g, pts) {
   g.beginShape();
   for (let p of pts) g.vertex(p.x, p.y);
   g.endShape(CLOSE);
-}
-
-function drawTargetGlyph(g, x, y, size, hex, alpha = 92) {
-  let c = color(hex); c.setAlpha(alpha);
-  g.push(); g.noFill(); g.stroke(c); g.strokeWeight(1);
-  g.circle(x, y, size); g.circle(x, y, size * 0.66); g.circle(x, y, size * 0.36);
-  g.line(x - size * 0.65, y, x + size * 0.65, y);
-  g.line(x, y - size * 0.65, x, y + size * 0.65); g.pop();
-}
-
-function drawBracket(g, x, y, w, h) {
-  g.push(); g.translate(x, y);
-  g.line(-w * 0.5, -h * 0.5, -w * 0.15, -h * 0.5);
-  g.line(-w * 0.5, -h * 0.5, -w * 0.5, h * 0.5);
-  g.line(w * 0.5, -h * 0.5, w * 0.15, -h * 0.5);
-  g.line(w * 0.5, -h * 0.5, w * 0.5, h * 0.5);
-  g.line(-w * 0.5, h * 0.5, -w * 0.15, h * 0.5);
-  g.line(w * 0.5, h * 0.5, w * 0.15, h * 0.5); g.pop();
 }
 
 function fitCanvas() {
