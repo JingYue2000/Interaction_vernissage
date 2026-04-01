@@ -40,6 +40,7 @@ GREEN_MIN = 3.8
 ORANGE_MIN = 3.65
 CUTOFF_MIN = 3.55
 ADV_TIME = 12
+REARM_DELAY = 2
 
 advertising = False
 last_fire = 0.0
@@ -48,19 +49,29 @@ last_battery_check = 0.0
 battery = 0.0
 dead = False
 advertising_until = 0.0
+rearm_at = 0.0
+was_connected = False
 
 
 def battery_voltage():
     return vbat.value * vbat.reference_voltage * 2 / 65535
 
 
-def show_status(voltage):
+def battery_color(voltage):
     if voltage >= GREEN_MIN:
-        pixel[0] = (0, 32, 0)
-    elif voltage >= ORANGE_MIN:
-        pixel[0] = (32, 10, 0)
+        return (0, 32, 0)
+    if voltage >= ORANGE_MIN:
+        return (32, 10, 0)
+    return (32, 0, 0)
+
+
+def show_status(now, voltage):
+    if advertising and int(now * 8) % 2:
+        pixel[0] = (0, 0, 32)
+    elif advertising:
+        pixel[0] = (0, 0, 0)
     else:
-        pixel[0] = (32, 0, 0)
+        pixel[0] = battery_color(voltage)
     pixel.show()
 
 
@@ -89,11 +100,12 @@ while True:
     if now - last_battery_check >= 1:
         battery = battery_voltage()
         last_battery_check = now
-        show_status(battery)
         if battery <= CUTOFF_MIN:
             dead = True
             print("Battery low", battery)
             stop_advertising()
+
+    show_status(now, battery)
 
     if dead:
         time.sleep(1)
@@ -105,10 +117,17 @@ while True:
 
     if ble.connected:
         advertising = False
-    elif delta > ARM_DELTA:
-        arm_advertising(now)
-    elif advertising and now >= advertising_until:
-        stop_advertising()
+        was_connected = True
+    else:
+        if was_connected:
+            was_connected = False
+            stop_advertising()
+            rearm_at = now + REARM_DELAY
+            print("Disconnected")
+        if advertising and now >= advertising_until:
+            stop_advertising()
+        elif now >= rearm_at and delta > ARM_DELTA:
+            arm_advertising(now)
 
     if ble.connected and delta > TRIGGER_DELTA and now - last_fire >= COOLDOWN:
         print("Space", delta)
