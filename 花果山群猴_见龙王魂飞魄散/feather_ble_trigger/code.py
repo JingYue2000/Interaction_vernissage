@@ -22,6 +22,7 @@ except RuntimeError:
     imu = LSM6DS(i2c)
 
 ble = adafruit_ble.BLERadio()
+ble.name = "Monkey Bolt"
 hid = HIDService()
 advertisement = ProvideServicesAdvertisement(hid)
 advertisement.appearance = 961
@@ -33,10 +34,12 @@ vbat = AnalogIn(board.VOLTAGE_MONITOR)
 
 COOLDOWN = 0.1
 TRIGGER_DELTA = 14.0
+ARM_DELTA = 24.0
 SAMPLE_DELAY = 0.01
 GREEN_MIN = 3.8
 ORANGE_MIN = 3.65
 CUTOFF_MIN = 3.55
+ADV_TIME = 12
 
 advertising = False
 last_fire = 0.0
@@ -44,6 +47,7 @@ last_accel = imu.acceleration
 last_battery_check = 0.0
 battery = 0.0
 dead = False
+advertising_until = 0.0
 
 
 def battery_voltage():
@@ -60,17 +64,23 @@ def show_status(voltage):
     pixel.show()
 
 
-def ensure_advertising():
+def stop_advertising():
     global advertising
-    if dead:
-        return
-    if ble.connected:
+    if advertising:
+        ble.stop_advertising()
         advertising = False
+        print("Advertising off")
+
+
+def arm_advertising(now):
+    global advertising, advertising_until
+    if dead or ble.connected:
         return
+    advertising_until = now + ADV_TIME
     if not advertising:
         ble.start_advertising(advertisement, scan_response)
         advertising = True
-        print("Advertising as", scan_response.complete_name)
+        print("Advertising as", ble.name)
 
 
 while True:
@@ -83,19 +93,22 @@ while True:
         if battery <= CUTOFF_MIN:
             dead = True
             print("Battery low", battery)
-            if advertising:
-                ble.stop_advertising()
-                advertising = False
+            stop_advertising()
 
     if dead:
         time.sleep(1)
         continue
 
-    ensure_advertising()
-
     accel = imu.acceleration
     delta = sum(abs(a - b) for a, b in zip(accel, last_accel))
     last_accel = accel
+
+    if ble.connected:
+        advertising = False
+    elif delta > ARM_DELTA:
+        arm_advertising(now)
+    elif advertising and now >= advertising_until:
+        stop_advertising()
 
     if ble.connected and delta > TRIGGER_DELTA and now - last_fire >= COOLDOWN:
         print("Space", delta)
