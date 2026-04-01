@@ -1,5 +1,3 @@
-import alarm
-import digitalio
 import time
 
 import adafruit_ble
@@ -53,9 +51,6 @@ dead = False
 advertising_until = 0.0
 rearm_at = 0.0
 was_connected = False
-button = digitalio.DigitalInOut(board.SWITCH)
-button.switch_to_input(pull=digitalio.Pull.UP)
-sleep_ready = False
 
 
 def battery_voltage():
@@ -99,26 +94,8 @@ def arm_advertising(now):
         print("Advertising as", ble.name)
 
 
-def sleep_now():
-    stop_advertising()
-    for connection in ble.connections:
-        connection.disconnect()
-    pixel[0] = (0, 0, 0)
-    pixel.show()
-    while not button.value:
-        time.sleep(SAMPLE_DELAY)
-    alarm.exit_and_deep_sleep_until_alarms(
-        alarm.pin.PinAlarm(board.SWITCH, False, pull=True)
-    )
-
-
 while True:
     now = time.monotonic()
-
-    if button.value:
-        sleep_ready = True
-    elif sleep_ready:
-        sleep_now()
 
     if now - last_battery_check >= 1:
         battery = battery_voltage()
