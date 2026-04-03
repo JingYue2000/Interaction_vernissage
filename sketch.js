@@ -8,7 +8,6 @@ const PAL_GLASS_FILL = PAL_TRACE.slice();
 const PAL_GLASS_TINT = PAL_ACCENT_ACTIVE.concat(["#a8d8ea", "#d4c5f9"]);
 const PAL_GLASS_RIM = PAL_GLOW.concat(["#00d2ff", "#c79bff"]);
 
-
 const URL_SEED = new URLSearchParams(window.location.search).get("seed");
 const SEED = URL_SEED !== null && Number.isFinite(Number(URL_SEED))
   ? Number(URL_SEED) : Math.floor(Math.random() * 1000000000);
@@ -160,12 +159,7 @@ function setup() {
   compLayer = createGraphics(W, H);
   grainLayer = createGraphics(W, H);
   shaderLayer = createGraphics(W, H, WEBGL);
-  bgLayer.smooth();
-  zoneLayer.smooth();
-  pulseLayer.smooth();
-  paintLayer.smooth();
-  compLayer.smooth();
-  grainLayer.smooth();
+  [bgLayer, zoneLayer, pulseLayer, paintLayer, compLayer].forEach(l => l.smooth());
   shaderLayer.noStroke();
   canvasRef.elt.style.imageRendering = "auto";
   posterShader = shaderLayer.createShader
@@ -388,31 +382,26 @@ function drawPulse(z, str) {
   let palette = getZoneDisplayPalette(z);
   let ft = color(palette.tint); ft.setAlpha(12 + str * 30);
   let st = color(palette.tint); st.setAlpha(8 + str * 18);
+  let sw = z.kind === "rect" ? 0.9 + str * 1.2 : 0.8 + str * 1.1;
   pulseLayer.push(); pulseLayer.noStroke(); pulseLayer.fill(ft);
-  if (z.kind === "poly") {
-    drawPoly(pulseLayer, z.points);
-    pulseLayer.noFill(); pulseLayer.stroke(st); pulseLayer.strokeWeight(0.8 + str * 1.1);
-    drawPoly(pulseLayer, z.points);
-  } else if (z.kind === "rect") {
-    pulseLayer.rectMode(CORNER); pulseLayer.rect(z.x, z.y, z.w, z.h, z.r);
-    pulseLayer.noFill(); pulseLayer.stroke(st); pulseLayer.strokeWeight(0.9 + str * 1.2);
-    pulseLayer.rect(z.x, z.y, z.w, z.h, z.r);
-  }
+  drawZoneShape(pulseLayer, z);
+  pulseLayer.noFill(); pulseLayer.stroke(st); pulseLayer.strokeWeight(sw);
+  drawZoneShape(pulseLayer, z);
   pulseLayer.pop();
 }
 
-function updateZones() {
-  for (let z of zones) {
+function updateZoneList(list, baseE, eMul, tMul, ss0, ss1, lrMul) {
+  for (let z of list) {
     let inf = zoneInf(dragonX, dragonY, z.center[0], z.center[1], z.radius[0], z.radius[1]);
-    let str = constrain(inf * (0.28 + energy * 1.05) + turn * 0.45, 0, 1);
-    let fh = ss(0.14, 0.86, str);
+    let str = constrain(inf * (baseE + energy * eMul) + turn * tMul, 0, 1);
+    let fh = ss(ss0, ss1, str);
     z.currentStrength = str;
     z.glowLevel = approachReactive(z.glowLevel, str, ZONE_ATTACK, ZONE_RELEASE);
     z.fractureLevel = approachReactive(z.fractureLevel, fh, ZONE_ATTACK, ZONE_RELEASE);
     if (!z.shards) continue;
     for (let s of z.shards) {
       let hd = dist(dragonX, dragonY, s.centroid.x, s.centroid.y);
-      let lr = max(z.radius[0], z.radius[1]) * 0.98;
+      let lr = max(z.radius[0], z.radius[1]) * lrMul;
       let hf = constrain(1 - hd / lr, 0, 1);
       let target = max(0, fh * 0.72 + hf * 0.82 - s.threshold);
       s.activation = approachReactive(s.activation, target, SHARD_ATTACK, SHARD_RELEASE);
@@ -421,25 +410,8 @@ function updateZones() {
   }
 }
 
-function updateBgFrags() {
-  for (let z of sceneConfig.bgFrags) {
-    let inf = zoneInf(dragonX, dragonY, z.center[0], z.center[1], z.radius[0], z.radius[1]);
-    let str = constrain(inf * (0.3 + energy * 0.8), 0, 1);
-    let fh = ss(0.1, 0.9, str);
-    z.currentStrength = str;
-    z.glowLevel = approachReactive(z.glowLevel, str, ZONE_ATTACK, ZONE_RELEASE);
-    z.fractureLevel = approachReactive(z.fractureLevel, fh, ZONE_ATTACK, ZONE_RELEASE);
-    if (!z.shards) continue;
-    for (let s of z.shards) {
-      let hd = dist(dragonX, dragonY, s.centroid.x, s.centroid.y);
-      let lr = max(z.radius[0], z.radius[1]);
-      let hf = constrain(1 - hd / lr, 0, 1);
-      let target = max(0, fh * 0.72 + hf * 0.82 - s.threshold);
-      s.activation = approachReactive(s.activation, target, SHARD_ATTACK, SHARD_RELEASE);
-    }
-    updateZoneRegroup(z);
-  }
-}
+function updateZones() { updateZoneList(zones, 0.28, 1.05, 0.45, 0.14, 0.86, 0.98); }
+function updateBgFrags() { updateZoneList(sceneConfig.bgFrags, 0.3, 0.8, 0, 0.1, 0.9, 1); }
 
 function renderZones() {
   zoneLayer.clear(); zoneLayer.push();
@@ -487,20 +459,14 @@ function buildZoneRegroupMaterial(z) {
 }
 
 function triggerZoneRegroup(z) {
-  let material = buildZoneRegroupMaterial(z);
-  z.fill = material.fill;
-  z.tint = material.tint;
-  z.rim = material.rim;
-  z.baseColor = material.fill;
-  if (material.glassMode) z.glassMode = material.glassMode;
-  z.flashFill = material.flashFill || material.fill;
-  z.flashTint = material.flashTint || material.tint;
-  z.flashRim = material.flashRim || material.rim;
-  z.regroupFlash = 1;
-  z.flipAnimating = true;
-  z.flipT = 0;
-  z.flipStart = z.mirrorX || 1;
-  z.flipTarget = -(z.mirrorX || 1);
+  let m = buildZoneRegroupMaterial(z);
+  Object.assign(z, {
+    fill: m.fill, tint: m.tint, rim: m.rim, baseColor: m.fill,
+    flashFill: m.flashFill || m.fill, flashTint: m.flashTint || m.tint, flashRim: m.flashRim || m.rim,
+    regroupFlash: 1, flipAnimating: true, flipT: 0,
+    flipStart: z.mirrorX || 1, flipTarget: -(z.mirrorX || 1),
+  });
+  if (m.glassMode) z.glassMode = m.glassMode;
 }
 
 function updateZoneRegroup(z) {
@@ -538,51 +504,41 @@ function updateZoneRegroup(z) {
 
 function drawZoneBase(g, z) {
   let isPanel = z.role === "panel";
-  let isAmbientGlass = z.glassMode === "ambient";
+  let amb = z.glassMode === "ambient";
+  let pick = (base, a, v) => !isPanel ? base : amb ? a : v;
   let frac = z.fractureLevel || 0;
-  let palette = getZoneDisplayPalette(z);
-  let fHex = palette.fill;
-  let eHex = palette.tint;
-  let rHex = palette.rim;
-  let baseAlpha = (z.alpha || 88) * (isPanel ? (isAmbientGlass ? 1.02 : 1.16) : 1.0);
-  let iAlpha = baseAlpha * max(0, 1 - frac * (isPanel ? (isAmbientGlass ? 1.22 : 1.34) : 1.25));
+  let { fill: fHex, tint: eHex, rim: rHex } = getZoneDisplayPalette(z);
+  let baseAlpha = (z.alpha || 88) * pick(1.0, 1.02, 1.16);
+  let iAlpha = baseAlpha * max(0, 1 - frac * pick(1.25, 1.22, 1.34));
   g.push();
-  let scaleX = getZoneMirrorScaleX(z);
   g.translate(z.center[0], z.center[1]);
-  g.scale(scaleX, 1);
+  g.scale(getZoneMirrorScaleX(z), 1);
   g.translate(-z.center[0], -z.center[1]);
   if (iAlpha > 6) {
-    let ft = isPanel
-      ? lerpColor(color(fHex), color(eHex), isAmbientGlass ? 0.12 : 0.22)
-      : color(fHex);
+    let ft = isPanel ? lerpColor(color(fHex), color(eHex), amb ? 0.12 : 0.22) : color(fHex);
     ft.setAlpha(iAlpha);
     g.push(); g.noStroke(); g.fill(ft);
     drawZoneShape(g, z);
     if (isPanel) {
-      let glaze = lerpColor(color(fHex), color(eHex), isAmbientGlass ? 0.48 : 0.74);
-      glaze.setAlpha((isAmbientGlass ? 6 : 10) + iAlpha * (isAmbientGlass ? 0.1 : 0.14));
-      g.fill(glaze);
-      drawZoneShape(g, z);
+      let glaze = lerpColor(color(fHex), color(eHex), amb ? 0.48 : 0.74);
+      glaze.setAlpha((amb ? 6 : 10) + iAlpha * (amb ? 0.1 : 0.14));
+      g.fill(glaze); drawZoneShape(g, z);
     }
     g.pop();
   }
-  let et = isPanel
-    ? lerpColor(color(fHex), color(eHex), isAmbientGlass ? 0.56 : 0.82)
-    : color(eHex);
-  et.setAlpha(max(isPanel ? (isAmbientGlass ? 18 : 32) : 14, iAlpha * (isPanel ? (isAmbientGlass ? 0.38 : 0.56) : 0.42)));
-  g.push(); g.noFill(); g.stroke(et); g.strokeWeight(isPanel ? (isAmbientGlass ? 0.85 : 1.15) : 0.7);
+  let et = isPanel ? lerpColor(color(fHex), color(eHex), amb ? 0.56 : 0.82) : color(eHex);
+  et.setAlpha(max(pick(14, 18, 32), iAlpha * pick(0.42, 0.38, 0.56)));
+  g.push(); g.noFill(); g.stroke(et); g.strokeWeight(pick(0.7, 0.85, 1.15));
   drawZoneShape(g, z);
   if (isPanel) {
     let depth = lerpColor(color(eHex), color("#4d3f76"), 0.68);
-    depth.setAlpha((isAmbientGlass ? 4 : 8) + iAlpha * (isAmbientGlass ? 0.08 : 0.14));
-    g.push(); g.translate(isAmbientGlass ? 2.4 : 3.2, isAmbientGlass ? 3.2 : 4.2); g.stroke(depth); g.strokeWeight(isAmbientGlass ? 0.65 : 0.85);
-    drawZoneShape(g, z);
-    g.pop();
+    depth.setAlpha((amb ? 4 : 8) + iAlpha * (amb ? 0.08 : 0.14));
+    g.push(); g.translate(amb ? 2.4 : 3.2, amb ? 3.2 : 4.2); g.stroke(depth); g.strokeWeight(amb ? 0.65 : 0.85);
+    drawZoneShape(g, z); g.pop();
     let rim = lerpColor(color(eHex), color(rHex), 0.44);
-    rim.setAlpha((isAmbientGlass ? 5 : 9) + iAlpha * (isAmbientGlass ? 0.08 : 0.12));
-    g.push(); g.translate(isAmbientGlass ? -1.8 : -2.8, isAmbientGlass ? -2.6 : -3.8); g.stroke(rim); g.strokeWeight(isAmbientGlass ? 0.5 : 0.65);
-    drawZoneShape(g, z);
-    g.pop();
+    rim.setAlpha((amb ? 5 : 9) + iAlpha * (amb ? 0.08 : 0.12));
+    g.push(); g.translate(amb ? -1.8 : -2.8, amb ? -2.6 : -3.8); g.stroke(rim); g.strokeWeight(amb ? 0.5 : 0.65);
+    drawZoneShape(g, z); g.pop();
   }
   g.pop();
   if (z.shards && z.shards.length > 0) {
@@ -591,18 +547,17 @@ function drawZoneBase(g, z) {
     for (let s of z.shards) {
       let act = constrain((s.activation || 0) * 0.78 + frac * 0.22, 0, 1);
       if (act <= 0.01) continue;
-      let off = act * (isPanel ? (isAmbientGlass ? 28 : 34) : 24) * (0.55 + s.depth * 0.95);
-      let st = lerpColor(bt, shardTint, isPanel ? (isAmbientGlass ? 0.28 + act * 0.18 : 0.42 + act * 0.24) : 0.24 + act * 0.16);
-      st.setAlpha((isPanel ? (isAmbientGlass ? 56 : 78) : 60) + act * (isPanel ? (isAmbientGlass ? 102 : 138) : 110));
+      let off = act * pick(24, 28, 34) * (0.55 + s.depth * 0.95);
+      let st = lerpColor(bt, shardTint, pick(0.24, 0.28, 0.42) + act * pick(0.16, 0.18, 0.24));
+      st.setAlpha(pick(60, 56, 78) + act * pick(110, 102, 138));
       let ss2 = lerpColor(shardTint, color(z.tint || z.baseColor), 0.36);
-      ss2.setAlpha((isPanel ? (isAmbientGlass ? 20 : 32) : 22) + act * (isPanel ? (isAmbientGlass ? 42 : 64) : 42));
+      ss2.setAlpha(pick(22, 20, 32) + act * pick(42, 42, 64));
       let shadow = lerpColor(color("#4d3f76"), shardTint, 0.18);
-      shadow.setAlpha((isAmbientGlass ? 5 : 8) + act * (isAmbientGlass ? 18 : 28));
+      shadow.setAlpha((amb ? 5 : 8) + act * (amb ? 18 : 28));
       g.push(); g.translate(s.dir.x * off, s.dir.y * off);
       if (isPanel) {
         g.push(); g.translate(s.dir.x * (2 + act * 3.5), s.dir.y * (2 + act * 3.5));
-        g.noStroke(); g.fill(shadow); drawPoly(g, s.points);
-        g.pop();
+        g.noStroke(); g.fill(shadow); drawPoly(g, s.points); g.pop();
       }
       g.noStroke(); g.fill(st); drawPoly(g, s.points);
       g.noFill(); g.stroke(ss2); g.strokeWeight(0.35 + act * 0.9); drawPoly(g, s.points);
@@ -631,17 +586,10 @@ function paintTrail() {
     let ft = lerpColor(base, tintC, 0.18 + act * 0.12);
     let st = lerpColor(base, tintC, 0.48);
     trailParticles.push({
-      x: px,
-      y: py,
-      rot,
-      pts,
-      strokeWeight: 0.35 + act * 0.9,
-      maxAge: floor(random(TRACE_LIFE_MIN, TRACE_LIFE_MAX)),
-      age: 0,
-      fillRgb: [red(ft), green(ft), blue(ft)],
-      strokeRgb: [red(st), green(st), blue(st)],
-      fillAlpha: random(78, 156),
-      strokeAlpha: random(24, 62),
+      x: px, y: py, rot, pts, strokeWeight: 0.35 + act * 0.9,
+      maxAge: floor(random(TRACE_LIFE_MIN, TRACE_LIFE_MAX)), age: 0,
+      fillRgb: [red(ft), green(ft), blue(ft)], strokeRgb: [red(st), green(st), blue(st)],
+      fillAlpha: random(78, 156), strokeAlpha: random(24, 62),
     });
   }
   let alive = [];
@@ -845,27 +793,16 @@ function mkZone(kind, p) {
   return initZoneState(z);
 }
 
-
 function initZoneState(z) {
-  z.currentStrength = 0;
-  z.glowLevel = 0;
-  z.fractureLevel = 0;
-  z.prevFractureLevel = 0;
-  z.wasFractured = false;
-  z.regroupCooldown = 0;
-  z.regroupFlash = 0;
-  z.flashFill = null;
-  z.flashTint = null;
-  z.flashRim = null;
-  z.mirrorX = 1;
-  z.flipAnimating = false;
-  z.flipT = 0;
-  z.flipStart = 1;
-  z.flipTarget = -1;
+  Object.assign(z, {
+    currentStrength: 0, glowLevel: 0, fractureLevel: 0, prevFractureLevel: 0,
+    wasFractured: false, regroupCooldown: 0, regroupFlash: 0,
+    flashFill: null, flashTint: null, flashRim: null,
+    mirrorX: 1, flipAnimating: false, flipT: 0, flipStart: 1, flipTarget: -1,
+  });
   z.shards = buildShards(z);
   return z;
 }
-
 
 function buildShards(z) {
   let perim = [];
@@ -924,7 +861,6 @@ function buildBackground() {
   bgLayer.pop();
 }
 
-
 function buildGrain() {
   randomSeed(SEED + 777); noiseSeed(SEED + 777);
   grainLayer.clear(); grainLayer.push(); grainLayer.strokeCap(SQUARE);
@@ -950,6 +886,7 @@ function drawPoly(g, pts) {
 }
 
 function fitCanvas() {
+
   let wr = window.innerWidth / window.innerHeight, ar = W / H;
   if (wr > ar) {
     let h = window.innerHeight; canvasRef.elt.style.width = h * ar + "px"; canvasRef.elt.style.height = h + "px";
