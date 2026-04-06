@@ -77,25 +77,7 @@ const TRAIL_TOKEN_POOL = [
   "[]",
   "=>",
 ];
-const ART_CODE_LINES = [
-  "const W = 720, H = 1020;",
-  "const SEED = Number(urlParams.get('seed')) || Math.random() * 1e9;",
-  "function setup(){ createCanvas(W, H); randomSeed(SEED); noiseSeed(SEED); }",
-  "sceneConfig = generateScene();",
-  "function draw(){ updateDragon(); updateZones(); renderZonesText(); }",
-  "let target = getAutoTarget();",
-  "dragonX = lerp(dragonX, target.x, DRAGON_FOLLOW_LERP);",
-  "dragonY = lerp(dragonY, target.y, DRAGON_FOLLOW_LERP);",
-  "updateZoneList(zones, 0.28, 1.05, 0.45, 0.14, 0.86, 0.98);",
-  "drawZoneText(g, zone, false);",
-  "paintPulsesText();",
-  "paintTrailText();",
-  "trailParticles.push({ x, y, tokens, points, maxAge });",
-  "const inf = zoneInf(dragonX, dragonY, cx, cy, rx, ry);",
-  "const str = constrain(inf * (0.28 + energy * 1.05) + turn * 0.45, 0, 1);",
-  "if (key === ' ') transformStep = min(transformStep + 1, MAX_TRANSFORM_STEP);",
-  "if (transformStep === MAX_TRANSFORM_STEP) drawPlainCodeFinal();",
-];
+const CODE_SLOT_MOD = 240;
 
 let canvasRef;
 let bgLayer;
@@ -120,6 +102,7 @@ let speed = 0;
 let turn = 0;
 let energy = 0;
 let transformStep = 0;
+let transformVisualT = 0;
 
 function setup() {
   pixelDensity(min(window.devicePixelRatio || 1, 2));
@@ -152,16 +135,16 @@ function setup() {
   buildBgFragTextLayer();
   buildGrainText();
   buildPlainCodeLayer();
+  renderZonesText(0);
   fitCanvas();
   console.info("Interaction3 seed:", SEED, "complexity:", COMPLEXITY.toFixed(2));
 }
 
 function draw() {
+  const targetT = transformStep / MAX_TRANSFORM_STEP;
+  transformVisualT = lerp(transformVisualT, targetT, 0.06);
+  if (abs(transformVisualT - targetT) < 0.001) transformVisualT = targetT;
   const t = getTransformT();
-  if (transformStep >= MAX_TRANSFORM_STEP) {
-    drawPlainCodeFinal();
-    return;
-  }
 
   updateDragon();
   updateZones();
@@ -173,11 +156,8 @@ function draw() {
 
   clear();
   image(bgLayer, 0, 0);
-  push();
-  tint(255, 255 * (1 - ss(0.08, 0.55, t)));
-  image(bgFragLayer, 0, 0);
-  pop();
   image(zoneLayer, 0, 0);
+  drawCompositionScaffold(t);
 
   push();
   blendMode(SCREEN);
@@ -189,21 +169,9 @@ function draw() {
 
   push();
   blendMode(MULTIPLY);
-  tint(255, 90 * (1 - t));
+  tint(255, 90 * (1 - ss(0.45, 1, t)));
   image(grainLayer, 0, 0);
   pop();
-
-  if (t > 0) {
-    push();
-    noStroke();
-    fill(255, 255 * ss(0.15, 1, t));
-    rect(0, 0, W, H);
-    pop();
-    push();
-    tint(255, 255 * ss(0.25, 1, t));
-    image(plainCodeLayer, 0, 0);
-    pop();
-  }
 }
 
 function getAutoTarget() {
@@ -333,11 +301,11 @@ function drawZoneText(g, z, subtle, staticMode = false, t = 0, staticBuild = fal
   const fs = constrain(map(area, 2200, 90000, 8, staticMode ? 22 : 28), 8, staticMode ? 24 : 34);
   const stepY = fs * (staticMode ? 1.16 : 1.05);
   const ep = staticBuild ? 0 : elementProgress(t, z.composeIndex || 0, subtle ? 0.07 : 0);
-  const colorLoss = ss(0.0, 0.33, ep);
-  const shapeLoss = ss(0.28, 0.68, ep);
-  const moveLoss = ss(0.62, 1.0, ep);
+  const colorLoss = stageColorLoss(ep);
+  const shapeLoss = stageShapeLoss(ep);
+  const moveLoss = stageMoveLoss(ep);
   const alphaBase = subtle ? 60 : 92;
-  const alpha = (alphaBase + z.glowLevel * 72) * (1 - moveLoss * 0.8);
+  const alpha = (alphaBase + z.glowLevel * 72) * (1 - ss(0.9, 1.0, moveLoss) * 0.9);
   const target = getComposeTarget(z.composeIndex || 0);
 
   const snippetA = z.snippet || pickSnippet();
@@ -352,23 +320,23 @@ function drawZoneText(g, z, subtle, staticMode = false, t = 0, staticBuild = fal
   g.textAlign(CENTER, CENTER);
 
   let line = 0;
-  const lineBudget = max(1, floor(lerp(5, 1, shapeLoss)));
+  const lineBudget = max(1, floor(lerp(6, 1, shapeLoss)));
   for (let y = b.minY + fs * 0.7; y <= b.maxY - fs * 0.4 && line < lineBudget; y += stepY) {
     const earlySnippet = line % 2 === 0 ? snippetA : snippetB;
-    const finalSnippet = ART_CODE_LINES[(z.composeIndex + line) % ART_CODE_LINES.length];
+    const finalSnippet = lineFromSource(`${snippetA} ${snippetB}`, (z.composeIndex || 0) + line, 58);
     const snippet = shapeLoss < 0.5 ? earlySnippet : finalSnippet;
     const c = morphColorToPlain(lerpColor(color(z.fill), color(z.tint), mixAmt), colorLoss + moveLoss * 0.22);
     const shadow = color(35, 22, 62, 110 + z.glowLevel * 70);
     c.setAlpha(alpha);
     const drawX = lerp(z.center[0], target.x + 6, moveLoss);
-    const drawY = lerp(y, target.y + line * 15, moveLoss);
+    const drawY = lerp(y, target.y + line * 16, moveLoss);
     g.textSize(fs + sin(frameCount * 0.02 + line) * (staticMode ? 0.35 : 0.8) * (1 - shapeLoss * 0.7));
     if (!staticMode && shapeLoss < 0.7) {
       g.fill(shadow);
       g.text(snippet, drawX + 1.1, drawY + 1.1);
     }
     g.fill(c);
-    if (moveLoss > 0.85) g.textAlign(LEFT, TOP);
+    if (moveLoss > 0.82) g.textAlign(LEFT, TOP);
     g.text(snippet, drawX, drawY);
     if (moveLoss > 0.85) g.textAlign(CENTER, CENTER);
     line += 1;
@@ -408,9 +376,9 @@ function paintPulsesText(t = getTransformT()) {
 
   for (const z of zones) {
     const ep = elementProgress(t, z.composeIndex || 0, 0.12);
-    const colorLoss = ss(0.0, 0.33, ep);
-    const shapeLoss = ss(0.28, 0.68, ep);
-    const moveLoss = ss(0.62, 1.0, ep);
+    const colorLoss = stageColorLoss(ep);
+    const shapeLoss = stageShapeLoss(ep);
+    const moveLoss = stageMoveLoss(ep);
     const target = getComposeTarget(z.composeIndex || 0);
     const inf = zoneInf(dragonX, dragonY, z.center[0], z.center[1], z.radius[0], z.radius[1]);
     const str = constrain(inf * (0.28 + energy * 1.05) + turn * 0.45, 0, 1);
@@ -460,7 +428,7 @@ function paintTrailText() {
       maxAge: floor(random(TRACE_LIFE_MIN, TRACE_LIFE_MAX)),
       age: 0,
       color: color(random(PAL_TRACE)),
-      composeIndex: floor(random(ART_CODE_LINES.length)),
+      composeIndex: floor(random(CODE_SLOT_MOD)),
       txOff: random(-6, 6),
       tyOff: random(-5, 5),
     });
@@ -478,9 +446,9 @@ function paintTrailText() {
 
     const fade = life * life * (3 - 2 * life);
     const ep = elementProgress(t, p.composeIndex || 0, 0.2);
-    const colorLoss = ss(0.0, 0.33, ep);
-    const shapeLoss = ss(0.28, 0.68, ep);
-    const moveLoss = ss(0.62, 1.0, ep);
+    const colorLoss = stageColorLoss(ep);
+    const shapeLoss = stageShapeLoss(ep);
+    const moveLoss = stageMoveLoss(ep);
     const tgt = getComposeTarget(p.composeIndex || 0);
     const c = morphColorToPlain(color(p.color), colorLoss);
     c.setAlpha((40 + 150 * fade) * (1 - moveLoss * 0.95));
@@ -489,27 +457,32 @@ function paintTrailText() {
 
     trailLayer.push();
     trailLayer.translate(px, py);
-    trailLayer.rotate(p.rot);
+    trailLayer.rotate(lerp(p.rot, 0, shapeLoss));
     trailLayer.fill(c);
     trailLayer.noStroke();
     const glyphScale = p.size * (0.55 + fade * 0.75);
     const step = max(1, floor((p.age > p.maxAge * 0.45 ? (COMPLEXITY < 0.55 ? 3 : 2) : (COMPLEXITY < 0.42 ? 2 : 1)) + shapeLoss * 2));
-    for (let i = 0; i < p.points.length; i += step) {
-      const pt = p.points[i];
-      const token = shapeLoss < 0.55
-        ? p.tokens[i % p.tokens.length]
-        : ART_CODE_LINES[p.composeIndex % ART_CODE_LINES.length].split(" ")[i % 6] || "const";
-      trailLayer.push();
-      trailLayer.translate(pt.x * glyphScale * (1 - shapeLoss), pt.y * glyphScale * (1 - shapeLoss));
-      trailLayer.rotate(pt.a + sin(frameCount * 0.04 + i) * 0.15);
-      trailLayer.textSize(glyphScale * (0.55 + pt.w * 0.75));
-      trailLayer.text(token, 0, 0);
-      trailLayer.pop();
+    if (shapeLoss > 0.68) {
+      trailLayer.textAlign(LEFT, TOP);
+      trailLayer.textSize(max(8, glyphScale * 0.7));
+      trailLayer.text(lineFromSource(p.tokens.join(" "), p.composeIndex, 34), 0, 0);
+      trailLayer.textAlign(CENTER, CENTER);
+    } else {
+      for (let i = 0; i < p.points.length; i += step) {
+        const pt = p.points[i];
+        const token = p.tokens[i % p.tokens.length];
+        trailLayer.push();
+        trailLayer.translate(pt.x * glyphScale, pt.y * glyphScale * (1 - shapeLoss));
+        trailLayer.rotate((pt.a + sin(frameCount * 0.04 + i) * 0.15) * (1 - shapeLoss));
+        trailLayer.textSize(glyphScale * (0.55 + pt.w * 0.75));
+        trailLayer.text(token, 0, 0);
+        trailLayer.pop();
+      }
     }
     trailLayer.pop();
 
     p.age += 1;
-    if (p.age < p.maxAge && moveLoss < 0.98) alive.push(p);
+    if (p.age < p.maxAge && moveLoss < 0.985) alive.push(p);
   }
 
   if (alive.length > MAX_TRAIL_PARTICLES) {
@@ -591,6 +564,39 @@ function drawPlainCodeFinal() {
   image(plainCodeLayer, 0, 0);
 }
 
+function drawCompositionScaffold(t) {
+  if (t <= 0) return;
+  const p = ss(0.62, 1.0, t);
+  if (p <= 0) return;
+
+  push();
+  stroke(0, 30 + p * 55);
+  strokeWeight(1);
+  noFill();
+
+  for (const z of zones) {
+    const ep = elementProgress(t, z.composeIndex || 0, 0.1);
+    const moveLoss = stageMoveLoss(ep);
+    if (moveLoss <= 0) continue;
+    const target = getComposeTarget(z.composeIndex || 0);
+    line(
+      lerp(z.center[0], target.x, moveLoss * 0.6),
+      lerp(z.center[1], target.y, moveLoss * 0.6),
+      target.x,
+      target.y
+    );
+  }
+
+  for (let i = 0; i < composeTargets.length - 1; i++) {
+    const a = composeTargets[i];
+    const b = composeTargets[i + 1];
+    const sameRow = abs(a.y - b.y) < 1;
+    if (sameRow) continue;
+    line(a.x, a.y + 12, b.x, b.y);
+  }
+  pop();
+}
+
 function generateScene() {
   randomSeed(SEED + 17);
   noiseSeed(SEED + 17);
@@ -636,7 +642,7 @@ function generateScene() {
         alpha: random(18, 72),
         snippet: pickSnippet(),
         snippet2: pickSnippet(),
-        composeIndex: i % ART_CODE_LINES.length,
+        composeIndex: i % CODE_SLOT_MOD,
       })
     );
   }
@@ -648,7 +654,7 @@ function generateScene() {
   const panelAnchors = [];
   for (let i = 0; i < panelCount; i++) {
     const panel = buildRandomPanel(panelAnchors, i < largeCount, cfg.gradient, i < ambientCount);
-    panel.composeIndex = (i + BG_FRAG_COUNT) % ART_CODE_LINES.length;
+    panel.composeIndex = (i + BG_FRAG_COUNT) % CODE_SLOT_MOD;
     cfg.panels.push(panel);
     cfg.reactiveZones.push(panel);
     panelAnchors.push({
@@ -898,7 +904,7 @@ function morphColorToPlain(c, t) {
 }
 
 function getTransformT() {
-  return transformStep / MAX_TRANSFORM_STEP;
+  return transformVisualT;
 }
 
 function buildComposeTargets() {
@@ -912,7 +918,7 @@ function buildComposeTargets() {
     composeTargets.push({
       x,
       y,
-      line: ART_CODE_LINES[i % ART_CODE_LINES.length],
+      line: lineFromSource(CODE_SNIPPETS[i % CODE_SNIPPETS.length], i, 72),
       index: i,
     });
     y += lineH;
@@ -921,7 +927,7 @@ function buildComposeTargets() {
 }
 
 function getComposeTarget(index) {
-  if (composeTargets.length === 0) return { x: 22, y: 34, line: ART_CODE_LINES[0], index: 0 };
+  if (composeTargets.length === 0) return { x: 22, y: 34, line: "const line = token;", index: 0 };
   return composeTargets[index % composeTargets.length];
 }
 
@@ -930,9 +936,34 @@ function elementProgress(t, idx, delay = 0) {
   return constrain((t - delay - phase) / (1 - delay), 0, 1);
 }
 
+function stageColorLoss(ep) {
+  return ss(0.0, 0.33, ep);
+}
+
+function stageShapeLoss(ep) {
+  return ss(0.33, 0.66, ep);
+}
+
+function stageMoveLoss(ep) {
+  return ss(0.66, 1.0, ep);
+}
+
 function stableHash(n) {
   let x = Math.sin((n + 1) * 12.9898) * 43758.5453;
   return Math.abs(Math.floor((x - Math.floor(x)) * 100000));
+}
+
+function lineFromSource(source, idx, targetChars = 48) {
+  const words = source.replace(/[^\w\[\]\(\)\{\};=<>+\-*\/]/g, " ").split(/\s+/).filter(Boolean);
+  const pool = words.length > 0 ? words : TRAIL_TOKEN_POOL;
+  let out = "";
+  let k = 0;
+  while (out.length < targetChars) {
+    const w = pool[(idx + k) % pool.length];
+    out += (k === 0 ? "" : " ") + w;
+    k += 1;
+  }
+  return out.slice(0, targetChars);
 }
 
 function pickSnippet() {
