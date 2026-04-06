@@ -39,7 +39,7 @@ const PANEL_COUNT = Math.floor(6 + COMPLEXITY * 12);
 const GRAIN_COUNT = Math.floor(900 + COMPLEXITY * 1700);
 
 const DRAGON_FOLLOW_LERP = 0.22;
-const MAX_TRANSFORM_STEP = 6;
+const MAX_TRANSFORM_STEP = 120;
 
 const CODE_SNIPPETS = [
   "const W = 720, H = 1020;",
@@ -142,7 +142,7 @@ function setup() {
 
 function draw() {
   const targetT = transformStep / MAX_TRANSFORM_STEP;
-  transformVisualT = lerp(transformVisualT, targetT, 0.06);
+  transformVisualT = lerp(transformVisualT, targetT, 0.22);
   if (abs(transformVisualT - targetT) < 0.001) transformVisualT = targetT;
   const t = getTransformT();
 
@@ -154,10 +154,13 @@ function draw() {
   if (frameCount % PULSE_REDRAW_INTERVAL === 0) paintPulsesText(t);
   paintTrailText();
 
-  clear();
+  background(255);
+  const bgFade = ss(0.08, 0.92, t);
+  push();
+  tint(255, 255 * (1 - bgFade));
   image(bgLayer, 0, 0);
+  pop();
   image(zoneLayer, 0, 0);
-  drawCompositionScaffold(t);
 
   push();
   blendMode(SCREEN);
@@ -305,7 +308,8 @@ function drawZoneText(g, z, subtle, staticMode = false, t = 0, staticBuild = fal
   const shapeLoss = stageShapeLoss(ep);
   const moveLoss = stageMoveLoss(ep);
   const alphaBase = subtle ? 60 : 92;
-  const alpha = (alphaBase + z.glowLevel * 72) * (1 - ss(0.9, 1.0, moveLoss) * 0.9);
+  const alphaRaw = (alphaBase + z.glowLevel * 72) * (1 - ss(0.9, 1.0, moveLoss) * 0.9);
+  const alpha = lerp(alphaRaw, 220, moveLoss);
   const target = getComposeTarget(z.composeIndex || 0);
 
   const snippetA = z.snippet || pickSnippet();
@@ -330,7 +334,8 @@ function drawZoneText(g, z, subtle, staticMode = false, t = 0, staticBuild = fal
     c.setAlpha(alpha);
     const drawX = lerp(z.center[0], target.x + 6, moveLoss);
     const drawY = lerp(y, target.y + line * 16, moveLoss);
-    g.textSize(fs + sin(frameCount * 0.02 + line) * (staticMode ? 0.35 : 0.8) * (1 - shapeLoss * 0.7));
+    const varSize = fs + sin(frameCount * 0.02 + line) * (staticMode ? 0.35 : 0.8) * (1 - shapeLoss * 0.7);
+    g.textSize(lerp(varSize, 12, moveLoss));
     if (!staticMode && shapeLoss < 0.7) {
       g.fill(shadow);
       g.text(snippet, drawX + 1.1, drawY + 1.1);
@@ -386,9 +391,9 @@ function paintPulsesText(t = getTransformT()) {
 
     const text = pickPulseToken(z.pulseSnippet || "zoneInf(dragonX, dragonY, cx, cy, rx, ry)");
     const c = morphColorToPlain(color(z.tint || z.fill || random(PAL_GLOW)), colorLoss);
-    c.setAlpha((40 + str * 130) * (1 - moveLoss * 0.95));
+    c.setAlpha(lerp((40 + str * 130) * (1 - moveLoss * 0.95), 200, moveLoss));
     pulseLayer.fill(c);
-    pulseLayer.textSize(11 + str * 16 * (1 - shapeLoss * 0.75));
+    pulseLayer.textSize(lerp(11 + str * 16 * (1 - shapeLoss * 0.75), 12, moveLoss));
 
     const rings = max(1, floor(map(str, 0, 1, 1, 5) * (1 - shapeLoss * 0.72)));
     for (let i = 0; i < rings; i++) {
@@ -396,7 +401,7 @@ function paintPulsesText(t = getTransformT()) {
       const r = min(z.radius[0], z.radius[1]) * (0.35 + str * 0.45);
       const ox = z.center[0] + cos(a) * r * (1 - shapeLoss);
       const oy = z.center[1] + sin(a) * r * (1 - shapeLoss);
-      const tx = target.x + i * 8;
+      const tx = target.x + i * 6;
       const ty = target.y;
       pulseLayer.text(text, lerp(ox, tx, moveLoss), lerp(oy, ty, moveLoss));
     }
@@ -451,7 +456,7 @@ function paintTrailText() {
     const moveLoss = stageMoveLoss(ep);
     const tgt = getComposeTarget(p.composeIndex || 0);
     const c = morphColorToPlain(color(p.color), colorLoss);
-    c.setAlpha((40 + 150 * fade) * (1 - moveLoss * 0.95));
+    c.setAlpha(lerp((40 + 150 * fade) * (1 - moveLoss * 0.95), 200, moveLoss));
     const px = lerp(p.x, tgt.x + p.txOff, moveLoss);
     const py = lerp(p.y, tgt.y + p.tyOff, moveLoss);
 
@@ -464,7 +469,7 @@ function paintTrailText() {
     const step = max(1, floor((p.age > p.maxAge * 0.45 ? (COMPLEXITY < 0.55 ? 3 : 2) : (COMPLEXITY < 0.42 ? 2 : 1)) + shapeLoss * 2));
     if (shapeLoss > 0.68) {
       trailLayer.textAlign(LEFT, TOP);
-      trailLayer.textSize(max(8, glyphScale * 0.7));
+      trailLayer.textSize(lerp(max(8, glyphScale * 0.7), 12, moveLoss));
       trailLayer.text(lineFromSource(p.tokens.join(" "), p.composeIndex, 34), 0, 0);
       trailLayer.textAlign(CENTER, CENTER);
     } else {
@@ -474,7 +479,7 @@ function paintTrailText() {
         trailLayer.push();
         trailLayer.translate(pt.x * glyphScale, pt.y * glyphScale * (1 - shapeLoss));
         trailLayer.rotate((pt.a + sin(frameCount * 0.04 + i) * 0.15) * (1 - shapeLoss));
-        trailLayer.textSize(glyphScale * (0.55 + pt.w * 0.75));
+        trailLayer.textSize(lerp(glyphScale * (0.55 + pt.w * 0.75), 12, moveLoss));
         trailLayer.text(token, 0, 0);
         trailLayer.pop();
       }
@@ -562,39 +567,6 @@ function buildPlainCodeLayer() {
 function drawPlainCodeFinal() {
   background(255);
   image(plainCodeLayer, 0, 0);
-}
-
-function drawCompositionScaffold(t) {
-  if (t <= 0) return;
-  const p = ss(0.62, 1.0, t);
-  if (p <= 0) return;
-
-  push();
-  stroke(0, 30 + p * 55);
-  strokeWeight(1);
-  noFill();
-
-  for (const z of zones) {
-    const ep = elementProgress(t, z.composeIndex || 0, 0.1);
-    const moveLoss = stageMoveLoss(ep);
-    if (moveLoss <= 0) continue;
-    const target = getComposeTarget(z.composeIndex || 0);
-    line(
-      lerp(z.center[0], target.x, moveLoss * 0.6),
-      lerp(z.center[1], target.y, moveLoss * 0.6),
-      target.x,
-      target.y
-    );
-  }
-
-  for (let i = 0; i < composeTargets.length - 1; i++) {
-    const a = composeTargets[i];
-    const b = composeTargets[i + 1];
-    const sameRow = abs(a.y - b.y) < 1;
-    if (sameRow) continue;
-    line(a.x, a.y + 12, b.x, b.y);
-  }
-  pop();
 }
 
 function generateScene() {
