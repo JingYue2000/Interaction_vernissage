@@ -24,6 +24,7 @@ const PAL_TRACE =
   "#c4b5e0-#a8d8ea-#d4c5f9-#9b59b6-#00d2ff-#d81159-#f52f57".split("-");
 const PAL_GLOW = "#d4c5f9-#00d2ff-#d81159-#f52f57".split("-");
 const PAL_ACCENT_ACTIVE = "#00d2ff-#d81159-#f52f57-#9b59b6".split("-");
+const PAGE_BG_START = "#d5c7ef";
 
 const ZONE_ATTACK = 0.18;
 const ZONE_RELEASE = 0.08;
@@ -188,6 +189,8 @@ function draw() {
   const { s1, s2, s3 } = getStageProgress(stageVisual);
   const morph = s1;
   const t = s1 < 1 ? 0 : s2 < 1 ? PRECHANGE_T * s2 : lerp(PRECHANGE_T, 1, s3);
+  const stage2BgFade = s1 < 1 ? 0 : s2;
+  updatePageBackground(stage2BgFade);
 
   updateDragon();
   updateZones();
@@ -198,10 +201,13 @@ function draw() {
   paintTrailText(morph, t);
 
   background(255);
+  push();
+  tint(255, 255 * (1 - stage2BgFade));
   image(bgBaseLayer, 0, 0);
+  pop();
   const bgFade = getGlobalColorLoss(t);
   push();
-  tint(255, 255 * morph * (1 - bgFade));
+  tint(255, 255 * morph * (1 - bgFade) * (1 - stage2BgFade * 0.95));
   image(bgLayer, 0, 0);
   pop();
   image(zoneLayer, 0, 0);
@@ -1138,6 +1144,13 @@ function getStageProgress(v) {
     s2: constrain((v - p1) / (p2 - p1), 0, 1),
     s3: constrain((v - p2) / (1 - p2), 0, 1),
   };
+}
+
+function updatePageBackground(stage2Fade) {
+  const c = lerpColor(color(PAGE_BG_START), color("#ffffff"), stage2Fade);
+  const hex = colorToHex(c);
+  document.documentElement.style.background = hex;
+  document.body.style.background = hex;
 }
 
 function buildComposeTargets() {
