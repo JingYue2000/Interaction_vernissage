@@ -1337,6 +1337,8 @@ function keyPressed() {
   if (!canvasRef || !canvasRef.elt) return true;
   if (key === " ") {
     if (stageStep < STAGE_TOTAL_STEPS) stageStep += 1;
+    else __vernNotifyWholeSwitch();
+    __vernPostWholeStage();
     return false;
   }
   if (key === "s" || key === "S") {
@@ -1345,3 +1347,59 @@ function keyPressed() {
   }
   return true;
 }
+
+function __vernSetStageStep(v) {
+  stageStep = constrain(Math.round(v), 0, STAGE_TOTAL_STEPS);
+}
+
+function __vernStepStage(delta) {
+  __vernSetStageStep(stageStep + delta);
+}
+
+window.__vernStageApi = {
+  getStep: () => stageStep,
+  getTotal: () => STAGE_TOTAL_STEPS,
+  setStep: (v) => __vernSetStageStep(v),
+  step: (d) => __vernStepStage(d),
+};
+
+const __VERN_WHOLE_CHANNEL = "vern-interaction3-bridge";
+
+function __vernPostWholeStage() {
+  if (window.parent === window) return;
+  window.parent.postMessage(
+    {
+      channel: __VERN_WHOLE_CHANNEL,
+      type: "stage",
+      step: stageStep,
+      total: STAGE_TOTAL_STEPS,
+    },
+    "*",
+  );
+}
+
+function __vernNotifyWholeSwitch() {
+  if (window.parent === window) return;
+  window.parent.postMessage(
+    {
+      channel: __VERN_WHOLE_CHANNEL,
+      type: "requestSwitch",
+    },
+    "*",
+  );
+}
+
+window.addEventListener("message", (evt) => {
+  const data = evt.data;
+  if (!data || data.channel !== __VERN_WHOLE_CHANNEL) return;
+
+  if (data.type === "step") {
+    __vernStepStage(Number(data.delta) || 1);
+    __vernPostWholeStage();
+    return;
+  }
+
+  if (data.type === "requestStage") {
+    __vernPostWholeStage();
+  }
+});

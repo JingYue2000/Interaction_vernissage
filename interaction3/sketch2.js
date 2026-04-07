@@ -544,3 +544,18 @@ function keyPressed() {
   }
   return true;
 }
+
+function __vernSetStageStep(v) {
+  stageStep = constrain(Math.round(v), 0, STAGE_TOTAL_STEPS);
+}
+
+function __vernStepStage(delta) {
+  __vernSetStageStep(stageStep + delta);
+}
+
+window.__vernStageApi = {
+  getStep: () => stageStep,
+  getTotal: () => STAGE_TOTAL_STEPS,
+  setStep: (v) => __vernSetStageStep(v),
+  step: (d) => __vernStepStage(d),
+};
