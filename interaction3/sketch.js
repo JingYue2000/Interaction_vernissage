@@ -178,7 +178,7 @@ function draw() {
   paintTrailText();
 
   background(255);
-  const bgFade = ss(0.08, 0.92, t);
+  const bgFade = getGlobalColorLoss(t);
   push();
   tint(255, 255 * (1 - bgFade));
   image(bgLayer, 0, 0);
@@ -621,6 +621,14 @@ function buildBackgroundText() {
   bgLayer.push();
   bgLayer.textFont("Courier New");
   bgLayer.textAlign(CENTER, CENTER);
+  bgLayer.noStroke();
+
+  const grad = bgLayer.drawingContext.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0.0, sceneConfig.gradient.top);
+  grad.addColorStop(0.42, sceneConfig.gradient.mid);
+  grad.addColorStop(1.0, sceneConfig.gradient.bottom);
+  bgLayer.drawingContext.fillStyle = grad;
+  bgLayer.drawingContext.fillRect(0, 0, W, H);
 
   for (let y = 0; y < H; y += 22) {
     const t = y / H;
@@ -1062,6 +1070,26 @@ function stageShapeLoss(ep) {
 
 function stageMoveLoss(ep) {
   return ss(0.66, 1.0, ep);
+}
+
+function getGlobalColorLoss(t) {
+  if (!sceneConfig) return stageColorLoss(t);
+  let total = 0;
+  let count = 0;
+
+  for (const z of sceneConfig.bgFrags) {
+    const ep = elementProgress(t, z.composeIndex || 0, 0.07);
+    total += stageColorLoss(ep);
+    count += 1;
+  }
+  for (const z of zones) {
+    const ep = elementProgress(t, z.composeIndex || 0, 0.0);
+    total += stageColorLoss(ep);
+    count += 1;
+  }
+
+  if (count === 0) return stageColorLoss(t);
+  return total / count;
 }
 
 function stableHash(n) {
