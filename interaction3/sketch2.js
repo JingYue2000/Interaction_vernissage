@@ -35,13 +35,13 @@ const STAGE_TOTAL_STEPS = STAGE1_STEPS + STAGE2_STEPS + STAGE3_STEPS;
 const MOUNTAIN_COUNT = Math.floor(420 + COMPLEXITY * 460);
 const SKY_FRAG_COUNT = Math.floor(180 + COMPLEXITY * 240);
 
-const PAGE_BG_START = "#08070d";
+const PAGE_BG_START = "#8ea5cd";
 
-const PAL_SKY_TOP = [16, 13, 30];
-const PAL_SKY_MID = [42, 37, 70];
-const PAL_SKY_LOW = [96, 90, 140];
-const PAL_MTN_A = [194, 76, 130];
-const PAL_MTN_B = [90, 165, 255];
+const PAL_SKY_TOP = [147, 169, 208];
+const PAL_SKY_MID = [128, 150, 192];
+const PAL_SKY_LOW = [103, 123, 161];
+const PAL_MTN_A = [23, 34, 63];
+const PAL_MTN_B = [52, 68, 104];
 
 const CODE_SNIPPETS = [
   "const C = Math.cos;",
@@ -131,10 +131,14 @@ function drawBackground(stage2BgFade, t) {
     skyLayer.line(0, y, W, y);
   }
 
-  const hazeAlpha = 80 * (1 - ss(0.4, 1, t));
+  const hazeAlpha = 126 * (1 - ss(0.35, 1, t));
   skyLayer.noStroke();
-  skyLayer.fill(255, 220, 235, hazeAlpha);
-  skyLayer.ellipse(W * 0.5, H * 0.72, W * 1.2, H * 0.45);
+  skyLayer.fill(184, 200, 226, hazeAlpha * 0.72);
+  skyLayer.ellipse(W * 0.5, H * 0.72, W * 1.34, H * 0.56);
+  skyLayer.fill(166, 185, 218, hazeAlpha * 0.52);
+  skyLayer.ellipse(W * 0.5, H * 0.82, W * 1.18, H * 0.42);
+  skyLayer.fill(70, 88, 126, 34 * (1 - ss(0.22, 1, t)));
+  skyLayer.ellipse(W * 0.5, H * 1.02, W * 1.26, H * 0.58);
 }
 
 function drawSkyTextMatter(t, morph) {
@@ -245,10 +249,10 @@ function buildSkyFragments() {
       w: random(10, 48),
       h: random(2, 10),
       size: random(8, 13),
-      alpha: random(18, 72),
+      alpha: random(12, 44),
       mix: random(),
-      colA: [130, 95, 190],
-      colB: [120, 165, 245],
+      colA: [157, 178, 214],
+      colB: [130, 153, 197],
       snippet: CODE_SNIPPETS[i % CODE_SNIPPETS.length],
       token: ["const", "bg", "mountain", "lerp", "fillRect"][i % 5],
       composeIndex: i,
@@ -265,13 +269,13 @@ function buildMountainElements() {
     mountainElements.push({
       i,
       size: random(2, 18),
-      alpha: random(24, 120),
+      alpha: random(56, 128),
       mix: random(),
       snippet,
       composeIndex: k,
       tx: random(-12, 22),
       ty: random(-6, 8),
-      baseCol: random(["#d04d8a", "#7ab4ff", "#bc87e8", "#57a0ff"]),
+      baseCol: random(["#1c2e57", "#273b66", "#2f476f", "#1f5b65"]),
     });
   }
 }
