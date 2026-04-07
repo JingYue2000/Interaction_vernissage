@@ -105,6 +105,25 @@ const TRAIL_TOKEN_POOL = [
   "=>",
 ];
 const CODE_SLOT_MOD = 240;
+const HANDOFF_TARGET_ASPECT = 2000 / 1200;
+const SKETCH2_REF_W = 2000;
+const SKETCH2_REF_H = 1200;
+const SKETCH2_REF_FONT = 22;
+const SKETCH2_REF_LINE_H = 26;
+const SKETCH2_REF_X = 24;
+const SKETCH2_REF_TOP = 32;
+const SKETCH2_FINAL_CODE_LINES = [
+  "document.body.style='margin:0;display:grid;place-items:center;height:100vh;background:#000',",
+  "c.width=2e3,c.height=1200,c.style='width:min(96vw,160vh)',x=c.getContext`2d`,C=Math.cos,r=Math.random,",
+  "R=(r,g,b,a)=>`rgba(${r},${g},${b},${a})`,A=new AudioContext,t=p=b=0,",
+  "(h=_=>{c.width|=0;t+=.06;with(x){",
+  "for(i=800;i--;fillRect(~setTransform(i,0,0,i,880+i+3*i*C(i),700+2*i*C(i/400)),~rotate(i/6+t/2),2,2))",
+  "fillStyle=R(i/5,i/4,i/3,.07);",
+  "if(p){resetTransform(),globalAlpha=p,fillStyle=strokeStyle='#fff',fillRect(0,0,2e3,1200),lineWidth=4,",
+  "beginPath(),moveTo(X=b,Y=v=0);for(i=60;i--;)lineTo(X+=i%4?v:v=v*.7+r()*24-12,Y+=18),i||stroke();p*=.6}}})(),",
+  "setInterval(h,40),g=_=>(o=A.createOscillator(),o.connect(A.destination),o.frequency.value=18,o.start(),",
+  "o.stop(A.currentTime+1),b=r()*2e3,p=1),onkeydown=e=>e.which-32||(A.resume(),g())",
+];
 
 let canvasRef;
 let bgLayer;
@@ -131,6 +150,8 @@ let turn = 0;
 let energy = 0;
 let stageStep = 0;
 let stageVisual = 0;
+let __vernHandoffStep = 0;
+let __vernHandoffTotal = 8;
 
 function setup() {
   pixelDensity(min(window.devicePixelRatio || 1, 2));
@@ -224,6 +245,47 @@ function draw() {
   blendMode(MULTIPLY);
   tint(255, 90 * (1 - ss(0.45, 1, t)));
   image(grainLayer, 0, 0);
+  pop();
+  drawWholeHandoffOverlay();
+}
+
+function drawWholeHandoffOverlay() {
+  if (__vernHandoffTotal <= 0) return;
+  const p = constrain(__vernHandoffStep / __vernHandoffTotal, 0, 1);
+  if (p <= 0.001) return;
+  const e = ss(0, 1, p);
+
+  const sx = W / SKETCH2_REF_W;
+  const blockX = SKETCH2_REF_X * sx;
+  const blockY = SKETCH2_REF_TOP * sx;
+  const targetFontSize = SKETCH2_REF_FONT * sx;
+  const targetLineH = SKETCH2_REF_LINE_H * sx;
+
+  push();
+  textFont("Courier New");
+  textAlign(LEFT, TOP);
+  noStroke();
+  const lineH = lerp(16, targetLineH, e);
+  const fontSize = lerp(12, targetFontSize, e);
+  const lines = min(SKETCH2_FINAL_CODE_LINES.length, composeTargets.length);
+
+  fill(255, 255 * e);
+  rect(0, 0, W, H);
+
+  for (let i = 0; i < lines; i++) {
+    const src = composeTargets[i];
+    const tx = blockX;
+    const ty = blockY + i * lineH;
+    const x = lerp(src.x, tx, e);
+    const y = lerp(src.y, ty, e);
+    const early = lineFromSource(src.line, i, 56);
+    const finalLine = SKETCH2_FINAL_CODE_LINES[i];
+    const reveal = max(8, floor(lerp(8, finalLine.length, e)));
+    const line = e < 0.7 ? early : finalLine.slice(0, reveal);
+    fill(0, 30 + 225 * e);
+    textSize(fontSize);
+    text(line, x, y);
+  }
   pop();
 }
 
@@ -1317,7 +1379,8 @@ function drawPoly(g, pts) {
 function fitCanvas() {
   if (!canvasRef || !canvasRef.elt) return;
   const wr = window.innerWidth / window.innerHeight;
-  const ar = W / H;
+  const hp = constrain(__vernHandoffStep / max(1, __vernHandoffTotal), 0, 1);
+  const ar = lerp(W / H, HANDOFF_TARGET_ASPECT, ss(0, 1, hp));
   if (wr > ar) {
     const h = window.innerHeight;
     canvasRef.elt.style.width = `${h * ar}px`;
@@ -1337,7 +1400,7 @@ function keyPressed() {
   if (!canvasRef || !canvasRef.elt) return true;
   if (key === " ") {
     if (stageStep < STAGE_TOTAL_STEPS) stageStep += 1;
-    else __vernNotifyWholeSwitch();
+    else __vernNotifyWholeAdvance();
     __vernPostWholeStage();
     return false;
   }
@@ -1378,12 +1441,12 @@ function __vernPostWholeStage() {
   );
 }
 
-function __vernNotifyWholeSwitch() {
+function __vernNotifyWholeAdvance() {
   if (window.parent === window) return;
   window.parent.postMessage(
     {
       channel: __VERN_WHOLE_CHANNEL,
-      type: "requestSwitch",
+      type: "requestAdvance",
     },
     "*",
   );
@@ -1396,6 +1459,17 @@ window.addEventListener("message", (evt) => {
   if (data.type === "step") {
     __vernStepStage(Number(data.delta) || 1);
     __vernPostWholeStage();
+    return;
+  }
+
+  if (data.type === "setHandoffStep") {
+    __vernHandoffStep = constrain(
+      Math.round(Number(data.step) || 0),
+      0,
+      9999,
+    );
+    __vernHandoffTotal = max(1, Math.round(Number(data.total) || 8));
+    fitCanvas();
     return;
   }
 

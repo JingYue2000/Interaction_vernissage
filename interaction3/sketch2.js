@@ -559,6 +559,10 @@ function __vernStepStage(delta) {
   __vernSetStageStep(stageStep + delta);
 }
 
+function __vernSnapVisualToStep() {
+  stageVisual = stageStep / STAGE_TOTAL_STEPS;
+}
+
 window.__vernStageApi = {
   getStep: () => stageStep,
   getTotal: () => STAGE_TOTAL_STEPS,
@@ -587,13 +591,19 @@ window.addEventListener("message", (evt) => {
 
   if (data.type === "setReverseMode") {
     __vernWholeReverseMode = Boolean(data.enabled);
-    if (__vernWholeReverseMode) __vernSetStageStep(STAGE_TOTAL_STEPS);
+    if (__vernWholeReverseMode) {
+      __vernSetStageStep(STAGE_TOTAL_STEPS);
+      __vernSnapVisualToStep();
+    }
     __vernPostWholeStage();
     return;
   }
 
   if (data.type === "step") {
     __vernStepStage(Number(data.delta) || 1);
+    if (__vernWholeReverseMode && stageStep === STAGE_TOTAL_STEPS) {
+      __vernSnapVisualToStep();
+    }
     __vernPostWholeStage();
     return;
   }
