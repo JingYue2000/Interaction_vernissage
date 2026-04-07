@@ -608,6 +608,13 @@ window.addEventListener("message", (evt) => {
     return;
   }
 
+  if (data.type === "setStep") {
+    __vernSetStageStep(Number(data.step));
+    __vernSnapVisualToStep();
+    __vernPostWholeStage();
+    return;
+  }
+
   if (data.type === "requestStage") {
     __vernPostWholeStage();
   }

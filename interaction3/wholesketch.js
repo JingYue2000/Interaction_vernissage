@@ -14,7 +14,8 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 let host = null;
 let frame = null;
 let pendingFrame = null;
-let switched = false;
+let activeKind = "first"; // "first" | "second"
+let direction = 1; // 1 forward, -1 backward
 let switching = false;
 let lastStep = 0;
 let lastTotal = 0;
@@ -29,13 +30,17 @@ function bootWhole() {
   host.style.overflow = "hidden";
 
   frame = createFrame(WHOLE_CONFIG.first);
-  frame.addEventListener("load", onFirstFrameLoad);
+  frame.addEventListener("load", () => {
+    postToFrame(frame, { type: "setHandoffStep", step: 0, total: WHOLE_CONFIG.handoffSteps });
+    postToFrame(frame, { type: "requestStage" });
+  });
   host.replaceChildren(frame);
   applyFrameMorph();
 
   window.addEventListener("message", onMessage, false);
   window.addEventListener("keydown", onKeyDown, true);
   document.addEventListener("keydown", onKeyDown, true);
+  window.addEventListener("resize", onWholeResize);
 }
 
 function createFrame(src) {
@@ -53,14 +58,6 @@ function createFrame(src) {
   return f;
 }
 
-function onFirstFrameLoad() {
-  if (!frame || switched) return;
-  handoffStep = 0;
-  postToFrame(frame, { type: "setHandoffStep", step: 0, total: WHOLE_CONFIG.handoffSteps });
-  postToFrame(frame, { type: "requestStage" });
-  applyFrameMorph();
-}
-
 function postToFrame(targetFrame, payload) {
   if (!targetFrame || !targetFrame.contentWindow) return;
   targetFrame.contentWindow.postMessage(
@@ -76,6 +73,7 @@ function postToChild(payload) {
 function onMessage(evt) {
   const data = evt.data;
   if (!data || data.channel !== WHOLE_CONFIG.channel) return;
+  if (!frame || evt.source !== frame.contentWindow) return;
 
   if (data.type === "stage") {
     const step = Number(data.step);
@@ -86,8 +84,8 @@ function onMessage(evt) {
   }
 
   if (data.type === "requestAdvance") {
-    if (switched || switching) return;
-    advanceSketch1Flow();
+    if (switching) return;
+    advanceByDirection();
   }
 }
 
@@ -104,27 +102,72 @@ function isSpaceKey(evt) {
 function onKeyDown(evt) {
   if (!isSpaceKey(evt)) return;
   if (switching) return;
-
   evt.preventDefault();
-  if (!switched) {
-    advanceSketch1Flow();
-    return;
-  }
-
-  if (lastStep > 0) postToChild({ type: "step", delta: -1 });
+  advanceByDirection();
 }
 
-function advanceSketch1Flow() {
-  if (lastTotal <= 0 || lastStep < lastTotal) {
-    handoffStep = 0;
-    postToChild({ type: "setHandoffStep", step: 0, total: WHOLE_CONFIG.handoffSteps });
-    applyFrameMorph();
-    postToChild({ type: "step", delta: 1 });
+function advanceByDirection() {
+  if (direction > 0) {
+    stepForward();
+    return;
+  }
+  stepBackward();
+}
+
+function stepForward() {
+  if (activeKind === "first") {
+    if (lastTotal <= 0 || lastStep < lastTotal) {
+      if (handoffStep !== 0) {
+        handoffStep = 0;
+        postToChild({ type: "setHandoffStep", step: 0, total: WHOLE_CONFIG.handoffSteps });
+        applyFrameMorph();
+      }
+      postToChild({ type: "step", delta: 1 });
+      return;
+    }
+
+    if (handoffStep < WHOLE_CONFIG.handoffSteps) {
+      handoffStep += 1;
+      postToChild({
+        type: "setHandoffStep",
+        step: handoffStep,
+        total: WHOLE_CONFIG.handoffSteps,
+      });
+      applyFrameMorph();
+      return;
+    }
+
+    beginSwitchTo("second");
     return;
   }
 
-  if (handoffStep < WHOLE_CONFIG.handoffSteps) {
-    handoffStep += 1;
+  // second in forward mode is code -> art, so step down
+  if (lastStep > 0) {
+    postToChild({ type: "step", delta: -1 });
+    return;
+  }
+
+  // End reached: flip direction and immediately start reversing on next press behavior.
+  direction = -1;
+  stepBackward();
+}
+
+function stepBackward() {
+  if (activeKind === "second") {
+    if (lastTotal <= 0 || lastStep < lastTotal) {
+      postToChild({ type: "step", delta: 1 });
+      return;
+    }
+
+    handoffStep = WHOLE_CONFIG.handoffSteps;
+    applyFrameMorph();
+    beginSwitchTo("first");
+    return;
+  }
+
+  // Backward through sketch1: handoff down, then stage down.
+  if (handoffStep > 0) {
+    handoffStep -= 1;
     postToChild({
       type: "setHandoffStep",
       step: handoffStep,
@@ -134,71 +177,90 @@ function advanceSketch1Flow() {
     return;
   }
 
-  switchToSecond();
+  if (lastStep > 0) {
+    postToChild({ type: "step", delta: -1 });
+    return;
+  }
+
+  // Beginning reached: flip direction and continue regular forward play.
+  direction = 1;
+  stepForward();
 }
 
-function switchToSecond() {
-  if (switched || switching || !frame || !host) return;
+function beginSwitchTo(targetKind) {
+  if (switching || !host || !frame) return;
   switching = true;
-  switched = true;
-  lastStep = 0;
-  lastTotal = 0;
-  handoffStep = WHOLE_CONFIG.handoffSteps;
-  applyFrameMorph();
 
-  pendingFrame = createFrame(WHOLE_CONFIG.second);
+  const targetSrc =
+    targetKind === "second" ? WHOLE_CONFIG.second : WHOLE_CONFIG.first;
+  pendingFrame = createFrame(targetSrc);
   pendingFrame.style.opacity = "0";
   pendingFrame.style.pointerEvents = "none";
   applyFrameStyles(pendingFrame);
-  pendingFrame.addEventListener("load", onSecondFrameReady, { once: true });
+
+  pendingFrame.addEventListener(
+    "load",
+    () => {
+      if (!pendingFrame) {
+        switching = false;
+        return;
+      }
+      if (targetKind === "second") {
+        postToFrame(pendingFrame, { type: "setReverseMode", enabled: true });
+        postToFrame(pendingFrame, { type: "requestStage" });
+      } else {
+        postToFrame(pendingFrame, { type: "setStep", step: 9999 });
+        postToFrame(pendingFrame, {
+          type: "setHandoffStep",
+          step: handoffStep,
+          total: WHOLE_CONFIG.handoffSteps,
+        });
+        postToFrame(pendingFrame, { type: "requestStage" });
+      }
+      startCrossfade(targetKind);
+    },
+    { once: true },
+  );
+
   host.appendChild(pendingFrame);
 }
 
-function onSecondFrameReady() {
-  if (!pendingFrame) {
-    switching = false;
-    return;
-  }
-  postToFrame(pendingFrame, { type: "setReverseMode", enabled: true });
-  postToFrame(pendingFrame, { type: "requestStage" });
-  startCrossfade();
-}
-
-function startCrossfade() {
+function startCrossfade(nextKind) {
   fadeStartMs = performance.now();
-  tickCrossfade();
-}
 
-function tickCrossfade() {
-  if (!frame || !pendingFrame) {
-    switching = false;
-    fadeRaf = 0;
-    return;
-  }
+  const tick = () => {
+    if (!frame || !pendingFrame) {
+      switching = false;
+      fadeRaf = 0;
+      return;
+    }
+    const now = performance.now();
+    const t = clamp((now - fadeStartMs) / WHOLE_CONFIG.crossfadeMs, 0, 1);
+    const e = t * t * (3 - 2 * t);
+    frame.style.opacity = `${1 - e}`;
+    pendingFrame.style.opacity = `${e}`;
 
-  const now = performance.now();
-  const t = clamp((now - fadeStartMs) / WHOLE_CONFIG.crossfadeMs, 0, 1);
-  const e = t * t * (3 - 2 * t);
-  frame.style.opacity = `${1 - e}`;
-  pendingFrame.style.opacity = `${e}`;
+    if (t >= 1) {
+      frame.remove();
+      frame = pendingFrame;
+      pendingFrame = null;
+      frame.style.opacity = "1";
+      frame.style.pointerEvents = "auto";
+      activeKind = nextKind;
+      switching = false;
+      fadeRaf = 0;
+      postToChild({ type: "requestStage" });
+      return;
+    }
 
-  if (t >= 1) {
-    frame.remove();
-    frame = pendingFrame;
-    pendingFrame = null;
-    frame.style.opacity = "1";
-    frame.style.pointerEvents = "auto";
-    switching = false;
-    fadeRaf = 0;
-    return;
-  }
+    fadeRaf = window.requestAnimationFrame(tick);
+  };
 
-  fadeRaf = window.requestAnimationFrame(tickCrossfade);
+  tick();
 }
 
 function applyFrameStyles(targetFrame) {
   if (!host || !targetFrame) return;
-
   const p = clamp(handoffStep / WHOLE_CONFIG.handoffSteps, 0, 1);
   const e = p * p * (3 - 2 * p);
 
@@ -218,14 +280,12 @@ function applyFrameStyles(targetFrame) {
   const s2 = fitToHost(SKETCH2_ASPECT);
   const w = s1.w + (s2.w - s1.w) * e;
   const h = s1.h + (s2.h - s1.h) * e;
-
   targetFrame.style.width = `${w}px`;
   targetFrame.style.height = `${h}px`;
 }
 
 function applyFrameMorph() {
   if (!host) return;
-
   const p = clamp(handoffStep / WHOLE_CONFIG.handoffSteps, 0, 1);
   const e = p * p * (3 - 2 * p);
   const bg = {
@@ -258,4 +318,3 @@ function tearDownWhole() {
 
 window.addEventListener("DOMContentLoaded", bootWhole);
 window.addEventListener("beforeunload", tearDownWhole);
-window.addEventListener("resize", onWholeResize);
