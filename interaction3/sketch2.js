@@ -10,6 +10,9 @@ const SETTINGS = {
   stage2Steps: 5,
   stage3Steps: 10,
   elementReductionRate: 1.35,
+  // Stage-3 step index where the final l.js code block starts fading in.
+  // 0 means immediately at stage-3 start, STAGE3_STEPS means only at the very end.
+  finalCodeFadeStartStep: 8,
 };
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -46,6 +49,12 @@ const STAGE3_STEPS = Math.max(
   Math.floor(Number(SETTINGS.stage3Steps) || 44),
 );
 const STAGE_TOTAL_STEPS = STAGE1_STEPS + STAGE2_STEPS + STAGE3_STEPS;
+const FINAL_CODE_FADE_START_STEP = clamp(
+  Math.floor(Number(SETTINGS.finalCodeFadeStartStep) || 0),
+  0,
+  STAGE3_STEPS,
+);
+const FINAL_CODE_FADE_START_S3 = FINAL_CODE_FADE_START_STEP / STAGE3_STEPS;
 
 const MOUNTAIN_COUNT = 800;
 const BG_TOKEN_COUNT = Math.floor(220 + COMPLEXITY * 240);
@@ -209,11 +218,12 @@ function drawBackgroundMatter(t, morph, s3, stage2BgFade, activeRatio) {
     );
     const tc = lerpColor(plain, color(0, 0, 0), ss(0.15, 1, s3));
     const finalAlpha = 232;
-    tc.setAlpha(lerp((12 + b.alpha * 0.85) * codeAppear, finalAlpha, stage3Mix));
+    tc.setAlpha(
+      lerp((12 + b.alpha * 0.85) * codeAppear, finalAlpha, stage3Mix),
+    );
     bgLayer.fill(tc);
     bgLayer.textSize(
-      lerp(b.size, 12, shapeLoss * 0.76 + moveLoss * 0.24) *
-        (1 - stage3Mix) +
+      lerp(b.size, 12, shapeLoss * 0.76 + moveLoss * 0.24) * (1 - stage3Mix) +
         FINAL_FONT_SIZE * stage3Mix,
     );
 
@@ -236,7 +246,7 @@ function drawBackgroundMatter(t, morph, s3, stage2BgFade, activeRatio) {
 }
 
 function drawFinalCodePage(s3) {
-  const appear = ss(0.1, 1, s3);
+  const appear = ss(FINAL_CODE_FADE_START_S3, 1, s3);
   if (appear <= 0.001) return;
 
   push();
