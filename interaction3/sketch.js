@@ -11,14 +11,20 @@ const SETTINGS = {
   transformEase: 0.22,
 };
 
-const SEED = Number.isFinite(Number(SETTINGS.seed))
-  ? Number(SETTINGS.seed)
-  : Math.floor(Math.random() * 1000000000);
+const HAS_CUSTOM_SEED =
+  SETTINGS.seed !== null &&
+  SETTINGS.seed !== undefined &&
+  SETTINGS.seed !== "";
+const SEED =
+  HAS_CUSTOM_SEED && Number.isFinite(Number(SETTINGS.seed))
+    ? Number(SETTINGS.seed)
+    : Math.floor(Math.random() * 1000000000);
 const COMPLEXITY = clamp(Number(SETTINGS.complexity), 0.2, 1.0);
 
 const PAL_TRACE =
   "#c4b5e0-#a8d8ea-#d4c5f9-#9b59b6-#00d2ff-#d81159-#f52f57".split("-");
 const PAL_GLOW = "#d4c5f9-#00d2ff-#d81159-#f52f57".split("-");
+const PAL_ACCENT_ACTIVE = "#00d2ff-#d81159-#f52f57-#9b59b6".split("-");
 
 const ZONE_ATTACK = 0.18;
 const ZONE_RELEASE = 0.08;
@@ -506,6 +512,7 @@ function paintPulsesText(t = getTransformT()) {
 
 function paintTrailText() {
   const t = getTransformT();
+  const morph = t;
   const ang = atan2(dragonY - lastDY, dragonX - lastDX);
   const na = ang + HALF_PI;
   const bs = map(sin(frameCount / 11), -1, 1, 34, 92);
@@ -528,10 +535,16 @@ function paintTrailText() {
       size: random(7, 18),
       maxAge: floor(random(TRACE_LIFE_MIN, TRACE_LIFE_MAX)),
       age: 0,
-      color: color(random(PAL_TRACE)),
+      color: pickTrailColor(),
       composeIndex: floor(random(CODE_SLOT_MOD)),
       txOff: random(-6, 6),
       tyOff: random(-5, 5),
+      vx: random(-1.4, 1.4),
+      vy: random(-1.4, 1.4),
+      wobbleAmp: random(0.6, 2.6),
+      wobbleFreq: random(0.02, 0.065),
+      wobblePhase: random(TWO_PI),
+      rotVel: random(-0.05, 0.05),
     });
   }
 
@@ -553,8 +566,22 @@ function paintTrailText() {
     const tgt = getComposeTarget(p.composeIndex || 0);
     const c = morphColorToPlain(color(p.color), colorLoss);
     c.setAlpha(lerp((40 + 150 * fade) * (1 - moveLoss * 0.95), 200, moveLoss));
-    const px = lerp(p.x, tgt.x + p.txOff, moveLoss);
-    const py = lerp(p.y, tgt.y + p.tyOff, moveLoss);
+    const motionBlend = 1 - morph;
+    p.x += p.vx * 0.18 * motionBlend;
+    p.y += p.vy * 0.18 * motionBlend;
+    p.vx *= 0.993;
+    p.vy *= 0.993;
+    p.rot += p.rotVel * motionBlend;
+    const wobX =
+      cos(frameCount * p.wobbleFreq + p.wobblePhase) *
+      p.wobbleAmp *
+      motionBlend;
+    const wobY =
+      sin(frameCount * (p.wobbleFreq * 1.17) + p.wobblePhase) *
+      p.wobbleAmp *
+      motionBlend;
+    const px = lerp(p.x + wobX, tgt.x + p.txOff, moveLoss);
+    const py = lerp(p.y + wobY, tgt.y + p.tyOff, moveLoss);
 
     trailLayer.push();
     trailLayer.translate(px, py);
@@ -1115,6 +1142,12 @@ function lineFromSource(source, idx, targetChars = 48) {
 
 function pickSnippet() {
   return random(CODE_SNIPPETS);
+}
+
+function pickTrailColor() {
+  const hex =
+    random() < 0.6 ? random(PAL_ACCENT_ACTIVE) : random(PAL_TRACE.concat(PAL_GLOW));
+  return color(hex);
 }
 
 function buildTrailTokens() {
