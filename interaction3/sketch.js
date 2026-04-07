@@ -398,7 +398,8 @@ function drawZoneText(
   const alphaBase = subtle ? 60 : 92;
   const alphaRaw =
     (alphaBase + z.glowLevel * 72) * (1 - ss(0.9, 1.0, moveLoss) * 0.9);
-  const alpha = lerp(alphaRaw, 220, moveLoss) * morph;
+  const zoneAlpha = lerp(alphaRaw, 220, moveLoss) * morph;
+  const codeAppear = ss(0.06, 0.86, morph);
   const target = getComposeTarget(z.composeIndex || 0);
 
   const snippetA = z.snippet || pickSnippet();
@@ -426,6 +427,8 @@ function drawZoneText(
     g.pop();
   }
 
+  if (!staticBuild && codeAppear <= 0.001) return;
+
   g.push();
   if (useClip) zoneClip(g, z);
   g.noStroke();
@@ -451,7 +454,7 @@ function drawZoneText(
       colorLoss + moveLoss * 0.22,
     );
     const shadow = color(35, 22, 62, 110 + z.glowLevel * 70);
-    c.setAlpha(alpha * morph);
+    c.setAlpha(zoneAlpha * codeAppear);
     const drawX = lerp(z.center[0], target.x + 6, moveLoss);
     const drawY = lerp(y, target.y + line * 16, moveLoss);
     const varSize =
@@ -461,6 +464,7 @@ function drawZoneText(
         (1 - shapeLoss * 0.7);
     g.textSize(lerp(varSize, 12, moveLoss));
     if (!staticMode && shapeLoss < 0.7) {
+      shadow.setAlpha((110 + z.glowLevel * 70) * codeAppear);
       g.fill(shadow);
       g.text(snippet, drawX + 1.1, drawY + 1.1);
     }
@@ -491,7 +495,7 @@ function drawZoneText(
       g.translate(sx, sy);
       g.rotate(atan2(s.dir.y, s.dir.x));
       const tc = morphColorToPlain(color(z.rim || z.tint || z.fill), colorLoss);
-      tc.setAlpha((80 + act * 130) * (1 - shapeLoss * 0.9));
+      tc.setAlpha((80 + act * 130) * (1 - shapeLoss * 0.9) * codeAppear);
       g.fill(tc);
       g.noStroke();
       g.textSize(sz);
