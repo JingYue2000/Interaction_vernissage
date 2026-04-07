@@ -9,7 +9,7 @@ const SETTINGS = {
   stageEase: 0.22,
   stage1Steps: 10,
   stage2Steps: 10,
-  stage3Steps: 42,
+  stage3Steps: 10,
 };
 
 const HAS_CUSTOM_SEED =

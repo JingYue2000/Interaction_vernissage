@@ -28,7 +28,13 @@ function bootWhole() {
 }
 
 function onFrameLoad() {
-  if (switched) return;
+  if (!switched) {
+    postToChild({ type: "requestStage" });
+    return;
+  }
+
+  // Initialize sketch2 in reverse mode: begin from final code state.
+  postToChild({ type: "setReverseMode", enabled: true });
   postToChild({ type: "requestStage" });
 }
 
@@ -53,6 +59,7 @@ function onMessage(evt) {
   }
 
   if (data.type === "requestSwitch") {
+    if (switched) return;
     switchToSecond();
   }
 }
@@ -68,20 +75,30 @@ function isSpaceKey(evt) {
 }
 
 function onKeyDown(evt) {
-  if (switched) return;
   if (!isSpaceKey(evt)) return;
 
   evt.preventDefault();
-  if (lastTotal > 0 && lastStep >= lastTotal) {
-    switchToSecond();
+  if (!switched) {
+    if (lastTotal > 0 && lastStep >= lastTotal) {
+      switchToSecond();
+      return;
+    }
+    postToChild({ type: "step", delta: 1 });
     return;
   }
-  postToChild({ type: "step", delta: 1 });
+
+  // sketch2 reverse flow: code -> art
+  if (lastStep > 0) {
+    postToChild({ type: "step", delta: -1 });
+    return;
+  }
 }
 
 function switchToSecond() {
   if (switched || !frame) return;
   switched = true;
+  lastStep = 0;
+  lastTotal = 0;
   frame.src = WHOLE_CONFIG.second;
 }
 

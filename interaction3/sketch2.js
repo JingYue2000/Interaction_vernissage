@@ -105,6 +105,7 @@ let bgTokens = [];
 let stageStep = 0;
 let stageVisual = 0;
 let lastBgStyle = "";
+let __vernWholeReverseMode = false;
 
 function setup() {
   pixelDensity(1);
@@ -535,7 +536,12 @@ function windowResized() {
 function keyPressed() {
   if (!canvasRef || !canvasRef.elt) return true;
   if (key === " ") {
-    if (stageStep < STAGE_TOTAL_STEPS) stageStep += 1;
+    if (__vernWholeReverseMode) {
+      if (stageStep > 0) stageStep -= 1;
+    } else {
+      if (stageStep < STAGE_TOTAL_STEPS) stageStep += 1;
+    }
+    __vernPostWholeStage();
     return false;
   }
   if (key === "s" || key === "S") {
@@ -559,3 +565,40 @@ window.__vernStageApi = {
   setStep: (v) => __vernSetStageStep(v),
   step: (d) => __vernStepStage(d),
 };
+
+const __VERN_WHOLE_CHANNEL = "vern-interaction3-bridge";
+
+function __vernPostWholeStage() {
+  if (window.parent === window) return;
+  window.parent.postMessage(
+    {
+      channel: __VERN_WHOLE_CHANNEL,
+      type: "stage",
+      step: stageStep,
+      total: STAGE_TOTAL_STEPS,
+    },
+    "*",
+  );
+}
+
+window.addEventListener("message", (evt) => {
+  const data = evt.data;
+  if (!data || data.channel !== __VERN_WHOLE_CHANNEL) return;
+
+  if (data.type === "setReverseMode") {
+    __vernWholeReverseMode = Boolean(data.enabled);
+    if (__vernWholeReverseMode) __vernSetStageStep(STAGE_TOTAL_STEPS);
+    __vernPostWholeStage();
+    return;
+  }
+
+  if (data.type === "step") {
+    __vernStepStage(Number(data.delta) || 1);
+    __vernPostWholeStage();
+    return;
+  }
+
+  if (data.type === "requestStage") {
+    __vernPostWholeStage();
+  }
+});
