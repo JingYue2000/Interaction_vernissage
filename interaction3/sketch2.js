@@ -67,6 +67,18 @@ const CODE_SNIPPETS = [
   "if (key === ' ') stageStep += 1;",
   "drawMountainToCode(layer, element, t, morph);",
 ];
+const FINAL_CODE_LINES = [
+  "document.body.style='margin:0;display:grid;place-items:center;height:100vh;background:#000',",
+  "c.width=2e3,c.height=1200,c.style='width:min(96vw,160vh)',x=c.getContext`2d`,C=Math.cos,r=Math.random,",
+  "R=(r,g,b,a)=>`rgba(${r},${g},${b},${a})`,A=new AudioContext,t=p=b=0,",
+  "(h=_=>{c.width|=0;t+=.06;with(x){",
+  "for(i=800;i--;fillRect(~setTransform(i,0,0,i,880+i+3*i*C(i),700+2*i*C(i/400)),~rotate(i/6+t/2),2,2))",
+  "fillStyle=R(i/5,i/4,i/3,.07);",
+  "if(p){resetTransform(),globalAlpha=p,fillStyle=strokeStyle='#fff',fillRect(0,0,2e3,1200),lineWidth=4,",
+  "beginPath(),moveTo(X=b,Y=v=0);for(i=60;i--;)lineTo(X+=i%4?v:v=v*.7+r()*24-12,Y+=18),i||stroke();p*=.6}}})(),",
+  "setInterval(h,40),g=_=>(o=A.createOscillator(),o.connect(A.destination),o.frequency.value=18,o.start(),",
+  "o.stop(A.currentTime+1),b=r()*2e3,p=1),onkeydown=e=>e.which-32||(A.resume(),g())",
+];
 
 let canvasRef;
 let bgLayer;
@@ -130,19 +142,27 @@ function draw() {
   if (redrawMountain) mountainLayer.clear();
 
   if (redrawBg) {
-    drawBackgroundMatter(t, morph, stage2BgFade, activeRatio);
+    drawBackgroundMatter(t, morph, s3, stage2BgFade, activeRatio);
   }
   if (redrawMountain) {
-    drawMountainMatter(t, morph, activeRatio);
+    drawMountainMatter(t, morph, s3, activeRatio);
   }
 
   background(255);
+  const sceneFade = 1 - ss(0.45, 1, s3);
+  push();
+  tint(255, 255 * sceneFade);
   image(bgLayer, 0, 0);
   image(mountainLayer, 0, 0, W, H);
+  pop();
+  drawFinalCodePage(s3);
 }
 
-function drawBackgroundMatter(t, morph, stage2BgFade, activeRatio) {
+function drawBackgroundMatter(t, morph, s3, stage2BgFade, activeRatio) {
   const darkness = 1 - stage2BgFade;
+  const stage3Mix = ss(0.08, 1, s3);
+  const stage3Lock = ss(0.55, 1, s3);
+  bgLayer.rectMode(CORNER);
   bgLayer.noStroke();
   bgLayer.fill(0, 0, 0, 255 * darkness);
   bgLayer.rect(0, 0, W, H);
@@ -158,8 +178,10 @@ function drawBackgroundMatter(t, morph, stage2BgFade, activeRatio) {
     const moveLoss = stageMoveLoss(ep);
     const target = getComposeTarget(b.composeIndex);
 
-    const x = lerp(b.x, target.x + b.tx, moveLoss);
-    const y = lerp(b.y, target.y, moveLoss);
+    const xMove = lerp(b.x, target.x + b.tx, moveLoss);
+    const yMove = lerp(b.y, target.y, moveLoss);
+    const x = lerp(xMove, target.x, stage3Lock);
+    const y = lerp(yMove, target.y, stage3Lock);
 
     if (morph < 1) {
       const a = b.alpha * (1 - morph) * darkness;
@@ -172,18 +194,32 @@ function drawBackgroundMatter(t, morph, stage2BgFade, activeRatio) {
 
     if (codeAppear <= 0.001) continue;
 
-    const tc = morphColorToPlain(
+    bgLayer.textFont(stage3Mix < 0.52 ? "Helvetica Neue" : "Courier New");
+
+    const plain = morphColorToPlain(
       color(130, 150, 185),
       colorLoss + moveLoss * 0.2,
     );
-    tc.setAlpha((18 + b.alpha * 0.9) * codeAppear);
+    const tc = lerpColor(plain, color(0, 0, 0), ss(0.2, 1, s3));
+    tc.setAlpha((12 + b.alpha * 0.85) * codeAppear * (0.85 + stage3Mix * 0.3));
     bgLayer.fill(tc);
-    bgLayer.textSize(lerp(b.size, 12, shapeLoss * 0.76 + moveLoss * 0.24));
+    bgLayer.textSize(
+      lerp(b.size, 12, shapeLoss * 0.76 + moveLoss * 0.24) *
+        (1 - stage3Mix) +
+        12 * stage3Mix,
+    );
 
-    const text =
+    let text =
       shapeLoss < 0.5
         ? b.token
         : lineFromSource(b.snippet, b.composeIndex + 3, 34);
+    if (stage3Mix > 0.35) {
+      const reveal = Math.max(
+        6,
+        Math.floor(lerp(8, target.line.length, ss(0.35, 1, s3))),
+      );
+      text = target.line.slice(0, reveal);
+    }
 
     if (moveLoss > 0.84) bgLayer.textAlign(LEFT, TOP);
     bgLayer.text(text, x, y);
@@ -191,7 +227,31 @@ function drawBackgroundMatter(t, morph, stage2BgFade, activeRatio) {
   }
 }
 
-function drawMountainMatter(t, morph, activeRatio) {
+function drawFinalCodePage(s3) {
+  const appear = ss(0.1, 1, s3);
+  if (appear <= 0.001) return;
+
+  push();
+  textFont("Courier New");
+  textAlign(LEFT, TOP);
+  const c = lerpColor(color(128, 145, 176), color(0, 0, 0), ss(0.25, 1, s3));
+  c.setAlpha(40 + 215 * appear);
+  noStroke();
+  fill(c);
+
+  const x = 24;
+  const top = 28;
+  const lineH = 16;
+  let y = top;
+  for (const line of FINAL_CODE_LINES) {
+    if (y > H - 24) break;
+    text(line, x, y);
+    y += lineH;
+  }
+  pop();
+}
+
+function drawMountainMatter(t, morph, s3, activeRatio) {
   mountainLayer.push();
   mountainLayer.textAlign(CENTER, CENTER);
   mountainLayer.noStroke();
@@ -199,6 +259,8 @@ function drawMountainMatter(t, morph, activeRatio) {
   const mt = millis() * 0.001;
   const codeAppear = ss(0.06, 0.9, morph);
   const rs = MOUNTAIN_RENDER_SCALE;
+  const stage3Mix = ss(0.08, 1, s3);
+  const stage3Lock = ss(0.58, 1, s3);
 
   for (const el of mountainElements) {
     if (el.keepRank > activeRatio) continue;
@@ -215,9 +277,11 @@ function drawMountainMatter(t, morph, activeRatio) {
     const baseSize = max(2, i * 2);
 
     const target = getComposeTarget(el.composeIndex);
-    const px = lerp(tx, target.x + el.tx, moveLoss) * rs;
-    const py = lerp(ty, target.y + el.ty, moveLoss) * rs;
-    const rot = lerp(ang, 0, shapeLoss);
+    const xMove = lerp(tx, target.x + el.tx, moveLoss);
+    const yMove = lerp(ty, target.y + el.ty, moveLoss);
+    const px = lerp(xMove, target.x, stage3Lock) * rs;
+    const py = lerp(yMove, target.y, stage3Lock) * rs;
+    const rot = lerp(lerp(ang, 0, shapeLoss), 0, stage3Mix);
 
     if (morph < 1) {
       const drawSize = lerp(baseSize, 13, shapeLoss * 0.8 + moveLoss * 0.2);
@@ -233,24 +297,36 @@ function drawMountainMatter(t, morph, activeRatio) {
 
     if (codeAppear <= 0.001) continue;
 
-    const tc = morphColorToPlain(
+    mountainLayer.textFont(stage3Mix < 0.52 ? "Helvetica Neue" : "Courier New");
+    const plain = morphColorToPlain(
       color(el.r, el.g, el.b),
       colorLoss + moveLoss * 0.2,
     );
-    tc.setAlpha((26 + el.a * 210) * codeAppear);
+    const tc = lerpColor(plain, color(0, 0, 0), ss(0.2, 1, s3));
+    tc.setAlpha((26 + el.a * 210) * codeAppear * (0.84 + stage3Mix * 0.36));
 
     mountainLayer.push();
     mountainLayer.translate(px, py);
     mountainLayer.rotate(rot * (1 - shapeLoss));
     mountainLayer.fill(tc);
     mountainLayer.textSize(
-      lerp(max(8, baseSize * 0.15), 12, shapeLoss * 0.84 + moveLoss * 0.16) * rs,
+      (lerp(max(8, baseSize * 0.15), 12, shapeLoss * 0.84 + moveLoss * 0.16) *
+        (1 - stage3Mix) +
+        12 * stage3Mix) *
+        rs,
     );
 
-    const text =
+    let text =
       shapeLoss < 0.52
         ? el.token
         : lineFromSource(el.snippet, el.composeIndex, 42);
+    if (stage3Mix > 0.35) {
+      const reveal = Math.max(
+        8,
+        Math.floor(lerp(10, target.line.length, ss(0.35, 1, s3))),
+      );
+      text = target.line.slice(0, reveal);
+    }
 
     if (moveLoss > 0.84) mountainLayer.textAlign(LEFT, TOP);
     mountainLayer.text(text, 0, 0);
@@ -319,10 +395,11 @@ function buildComposeTargets() {
   let y = top;
   let i = 0;
   while (y < H - 24) {
+    const codeLine = FINAL_CODE_LINES[i % FINAL_CODE_LINES.length];
     composeTargets.push({
       x,
       y,
-      line: lineFromSource(CODE_SNIPPETS[i % CODE_SNIPPETS.length], i, 84),
+      line: codeLine,
       index: i,
     });
     y += lineH;
