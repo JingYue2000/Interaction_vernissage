@@ -4,11 +4,11 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 const SETTINGS = {
   seed: null,
-  complexity: 0.1,
+  complexity: 0.3,
   preChangeT: 0.18,
   stageEase: 0.22,
-  stage1Steps: 500,
-  stage2Steps: 500,
+  stage1Steps: 10,
+  stage2Steps: 10,
   stage3Steps: 42,
 };
 
