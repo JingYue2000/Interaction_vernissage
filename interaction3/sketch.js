@@ -7,8 +7,8 @@ const SETTINGS = {
   complexity: 0.3,
   preChangeT: 0.18,
   stageEase: 0.22,
-  stage1Steps: 5,
-  stage2Steps: 5,
+  stage1Steps: 10,
+  stage2Steps: 10,
   stage3Steps: 10,
 };
 
@@ -87,6 +87,41 @@ const CODE_SNIPPETS = [
   "Object.assign(z, { glowLevel: 0, fractureLevel: 0 });",
   "let splitStr = uSplit * (1.0 + energy * 0.6);",
   "drawTextGlyph(g, snippet, x, y, size, angle);",
+];
+const ZONE_SNIPPETS = [
+  "let inf = zoneInf(dragonX, dragonY, z.center[0], z.center[1], z.radius[0], z.radius[1]);",
+  "let str = constrain(inf * (baseE + energy * eMul) + turn * tMul, 0, 1);",
+  "z.glowLevel = approachReactive(z.glowLevel, str, ZONE_ATTACK, ZONE_RELEASE);",
+  "z.fractureLevel = approachReactive(z.fractureLevel, fh, ZONE_ATTACK, ZONE_RELEASE);",
+  "if (z.kind === \"poly\") drawPoly(g, z.points);",
+  "let frac = z.fractureLevel || 0;",
+];
+const PULSE_SNIPPETS = [
+  "let inf = zoneInf(dragonX, dragonY, z.center[0], z.center[1], z.radius[0], z.radius[1]);",
+  "let str = constrain(inf * (0.28 + energy * 1.05) + turn * 0.45, 0, 1);",
+  "let rings = max(1, floor(map(str, 0, 1, 1, 5)));",
+  "pulseLayer.text(z.role === \"target\" ? \"g()\" : random([\"if\", \"for\", \"let\", \"const\", \"draw\"]), ox, oy);",
+];
+const TRAIL_SNIPPETS = [
+  "trailParticles.push({",
+  "let ang = atan2(dragonY - lastDY, dragonX - lastDX), na = ang + HALF_PI;",
+  "let fade = life * life * (3 - 2 * life);",
+  "paintLayer.noStroke(); paintLayer.fill(ft); drawPoly(paintLayer, p.pts);",
+  "paintLayer.noFill(); paintLayer.stroke(st); paintLayer.strokeWeight(p.strokeWeight);",
+  "drawPoly(paintLayer, p.pts);",
+];
+const BG_SNIPPETS = [
+  "let grad = bgLayer.drawingContext.createLinearGradient(0, 0, 0, H);",
+  "grad.addColorStop(0.0, sceneConfig.gradient.top);",
+  "grad.addColorStop(0.42, sceneConfig.gradient.mid);",
+  "grad.addColorStop(1.0, sceneConfig.gradient.bottom);",
+  "bgLayer.drawingContext.fillRect(0, 0, W, H);",
+];
+const SHARD_SNIPPETS = [
+  "let off = act * pick(24, 28, 34) * (0.55 + s.depth * 0.95);",
+  "g.noStroke(); g.fill(st); drawPoly(g, s.points);",
+  "g.noFill(); g.stroke(ss2); g.strokeWeight(0.35 + act * 0.9); drawPoly(g, s.points);",
+  "g.push(); g.translate(s.dir.x * off, s.dir.y * off);",
 ];
 const TRAIL_TOKEN_POOL = [
   "if",
@@ -815,7 +850,7 @@ function buildBackgroundText() {
     bgLayer.noStroke();
     bgLayer.textSize(12 + noise(y * 0.02) * 7);
     const x = W * 0.5 + sin(y * 0.03) * 26;
-    const snippet = pickSnippet();
+    const snippet = BG_SNIPPETS[(y / 22) % BG_SNIPPETS.length];
     bgLayer.fill(shadow);
     bgLayer.text(snippet, x + 1.1, y + 11.1);
     bgLayer.fill(col);
@@ -918,8 +953,8 @@ function generateScene() {
         tint: col,
         rim: random(PAL_GLOW),
         alpha: random(18, 72),
-        snippet: pickSnippet(),
-        snippet2: pickSnippet(),
+        snippet: ZONE_SNIPPETS[i % ZONE_SNIPPETS.length],
+        snippet2: ZONE_SNIPPETS[(i + 1) % ZONE_SNIPPETS.length],
         composeIndex: i % CODE_SLOT_MOD,
       }),
     );
@@ -994,9 +1029,11 @@ function buildRandomPanel(existingAnchors, large, gradient, ambient) {
     tint: material.tint,
     rim: material.rim,
     alpha: ambient ? random(46, 88) : random(96, 132),
-    snippet: pickSnippet(),
-    snippet2: pickSnippet(),
-    pulseSnippet: pickSnippet(),
+    snippet: ZONE_SNIPPETS[existingAnchors.length % ZONE_SNIPPETS.length],
+    snippet2:
+      ZONE_SNIPPETS[(existingAnchors.length + 2) % ZONE_SNIPPETS.length],
+    pulseSnippet:
+      PULSE_SNIPPETS[existingAnchors.length % PULSE_SNIPPETS.length],
   });
 }
 
@@ -1090,7 +1127,7 @@ function buildShards(z) {
       depth: random(0.4, 1),
       threshold: i / perim.length + random(-0.08, 0.1),
       activation: 0,
-      snippet: pickSnippet(),
+      snippet: SHARD_SNIPPETS[i % SHARD_SNIPPETS.length],
     });
   }
 
@@ -1314,7 +1351,10 @@ function pickTrailColor() {
 }
 
 function buildTrailTokens() {
-  const snippet = pickSnippet().replace(/[,\.;:{}()]/g, " ");
+  const snippet = TRAIL_SNIPPETS[floor(random(TRAIL_SNIPPETS.length))].replace(
+    /[,\.;:{}()]/g,
+    " ",
+  );
   const words = snippet.split(/\s+/).filter(Boolean);
   const picked = [];
   const target = floor(random(4 + COMPLEXITY * 2, 7 + COMPLEXITY * 4));

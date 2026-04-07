@@ -6,8 +6,8 @@ const SETTINGS = {
   complexity: 0.2,
   preChangeT: 0.2,
   stageEase: 0.22,
-  stage1Steps: 5,
-  stage2Steps: 5,
+  stage1Steps: 10,
+  stage2Steps: 10,
   stage3Steps: 10,
   elementReductionRate: 1.35,
   // Stage-3 step index where the final l.js code block starts fading in.
@@ -81,6 +81,20 @@ const CODE_SNIPPETS = [
   "const ep = elementProgress(t, idx, 0.06);",
   "if (key === ' ') stageStep += 1;",
   "drawMountainToCode(layer, element, t, morph);",
+];
+const BG_CODE_SNIPPETS = [
+  "document.body.style='margin:0;display:grid;place-items:center;height:100vh;background:#000',",
+  "c.width=2e3,c.height=1200,c.style='width:min(96vw,160vh)',x=c.getContext`2d`,C=Math.cos,r=Math.random,",
+  "R=(r,g,b,a)=>`rgba(${r},${g},${b},${a})`,A=new AudioContext,t=p=b=0,",
+  "setInterval(h,40),g=_=>(o=A.createOscillator(),o.connect(A.destination),o.frequency.value=18,o.start(),",
+  "o.stop(A.currentTime+1),b=r()*2e3,p=1),onkeydown=e=>e.which-32||(A.resume(),g())",
+];
+const MOUNTAIN_CODE_SNIPPETS = [
+  "(h=_=>{c.width|=0;t+=.06;with(x){",
+  "for(i=800;i--;fillRect(~setTransform(i,0,0,i,880+i+3*i*C(i),700+2*i*C(i/400)),~rotate(i/6+t/2),2,2))",
+  "fillStyle=R(i/5,i/4,i/3,.07);",
+  "if(p){resetTransform(),globalAlpha=p,fillStyle=strokeStyle='#fff',fillRect(0,0,2e3,1200),lineWidth=4,",
+  "beginPath(),moveTo(X=b,Y=v=0);for(i=60;i--;)lineTo(X+=i%4?v:v=v*.7+r()*24-12,Y+=18),i||stroke();p*=.6}}})(),",
 ];
 const FINAL_CODE_LINES = [
   "document.body.style='margin:0;display:grid;place-items:center;height:100vh;background:#000',",
@@ -371,8 +385,8 @@ function buildBackgroundTokens() {
       size: random(8, 12),
       alpha: random(8, 30),
       tint: random(0, 34),
-      snippet: CODE_SNIPPETS[i % CODE_SNIPPETS.length],
-      token: ["const", "ctx", "fillRect", "setTransform", "rotate"][i % 5],
+      snippet: BG_CODE_SNIPPETS[i % BG_CODE_SNIPPETS.length],
+      token: tokenFromSnippet(BG_CODE_SNIPPETS[i % BG_CODE_SNIPPETS.length]),
       composeIndex: 1200 + i,
       tx: random(-8, 14),
       keepRank: random(),
@@ -384,7 +398,7 @@ function buildMountainElements() {
   mountainElements = [];
   for (let idx = 0; idx < MOUNTAIN_COUNT; idx++) {
     const i = MOUNTAIN_COUNT - 1 - idx;
-    const snippet = CODE_SNIPPETS[idx % CODE_SNIPPETS.length];
+    const snippet = MOUNTAIN_CODE_SNIPPETS[idx % MOUNTAIN_CODE_SNIPPETS.length];
     mountainElements.push({
       i,
       r: i / 5,
@@ -392,13 +406,33 @@ function buildMountainElements() {
       b: i / 3,
       a: 0.07,
       snippet,
-      token: ["i", "C(i)", "fillRect", "setTransform", "rgba"][idx % 5],
+      token: tokenFromSnippet(snippet),
       composeIndex: idx,
       tx: random(-10, 16),
       ty: random(-6, 7),
       keepRank: random(),
     });
   }
+}
+
+function tokenFromSnippet(snippet) {
+  const words = snippet
+    .replace(/[^\w$]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  const stop = new Set([
+    "const",
+    "let",
+    "var",
+    "if",
+    "for",
+    "return",
+    "function",
+  ]);
+  for (const w of words) {
+    if (!stop.has(w)) return w;
+  }
+  return words[0] || "code";
 }
 
 function getActiveElementRatio() {
