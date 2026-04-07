@@ -1,18 +1,23 @@
 const W = 720;
 const H = 1020;
-const URL_PARAMS = new URLSearchParams(window.location.search);
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-const URL_SEED = URL_PARAMS.get("seed");
-const SEED = URL_SEED !== null && Number.isFinite(Number(URL_SEED))
-  ? Number(URL_SEED)
-  : Math.floor(Math.random() * 1000000000);
-const URL_COMPLEXITY = Number(URL_PARAMS.get("complexity"));
-const COMPLEXITY = Number.isFinite(URL_COMPLEXITY)
-  ? clamp(URL_COMPLEXITY, 0.2, 1.0)
-  : 0.58;
+const SETTINGS = {
+  seed: null,
+  complexity: 0.58,
+  keyStepEarly: 500,
+  keyStepLate: 2,
+  preChangeT: 0.18,
+  transformEase: 0.22,
+};
 
-const PAL_TRACE = "#c4b5e0-#a8d8ea-#d4c5f9-#9b59b6-#00d2ff-#d81159-#f52f57".split("-");
+const SEED = Number.isFinite(Number(SETTINGS.seed))
+  ? Number(SETTINGS.seed)
+  : Math.floor(Math.random() * 1000000000);
+const COMPLEXITY = clamp(Number(SETTINGS.complexity), 0.2, 1.0);
+
+const PAL_TRACE =
+  "#c4b5e0-#a8d8ea-#d4c5f9-#9b59b6-#00d2ff-#d81159-#f52f57".split("-");
 const PAL_GLOW = "#d4c5f9-#00d2ff-#d81159-#f52f57".split("-");
 
 const ZONE_ATTACK = 0.18;
@@ -31,8 +36,10 @@ const TRACE_COUNT_MAX = Math.floor(4 + COMPLEXITY * 7);
 const TRACE_LIFE_MIN = 58;
 const TRACE_LIFE_MAX = 88;
 const MAX_TRAIL_PARTICLES = Math.floor(70 + COMPLEXITY * 140);
-const ZONE_REDRAW_INTERVAL = COMPLEXITY >= 0.78 ? 1 : COMPLEXITY >= 0.52 ? 2 : 3;
-const PULSE_REDRAW_INTERVAL = COMPLEXITY >= 0.78 ? 1 : COMPLEXITY >= 0.52 ? 2 : 3;
+const ZONE_REDRAW_INTERVAL =
+  COMPLEXITY >= 0.78 ? 1 : COMPLEXITY >= 0.52 ? 2 : 3;
+const PULSE_REDRAW_INTERVAL =
+  COMPLEXITY >= 0.78 ? 1 : COMPLEXITY >= 0.52 ? 2 : 3;
 const SHARD_SUBDIV = COMPLEXITY >= 0.62 ? 3 : 2;
 const BG_FRAG_COUNT = Math.floor(10 + COMPLEXITY * 24);
 const PANEL_COUNT = Math.floor(6 + COMPLEXITY * 12);
@@ -40,6 +47,10 @@ const GRAIN_COUNT = Math.floor(900 + COMPLEXITY * 1700);
 
 const DRAGON_FOLLOW_LERP = 0.22;
 const MAX_TRANSFORM_STEP = 120;
+const KEY_STEP_EARLY = clamp(Number(SETTINGS.keyStepEarly), 1, 24);
+const KEY_STEP_LATE = clamp(Number(SETTINGS.keyStepLate), 1, 12);
+const PRECHANGE_T = clamp(Number(SETTINGS.preChangeT), 0.02, 0.6);
+const TRANSFORM_EASE = clamp(Number(SETTINGS.transformEase), 0.08, 0.45);
 
 const CODE_SNIPPETS = [
   "const W = 720, H = 1020;",
@@ -118,7 +129,14 @@ function setup() {
   grainLayer = createGraphics(W, H);
   plainCodeLayer = createGraphics(W, H);
 
-  [bgLayer, bgFragLayer, zoneLayer, pulseLayer, trailLayer, plainCodeLayer].forEach((l) => {
+  [
+    bgLayer,
+    bgFragLayer,
+    zoneLayer,
+    pulseLayer,
+    trailLayer,
+    plainCodeLayer,
+  ].forEach((l) => {
     l.smooth();
     l.textFont("Courier New");
     l.textAlign(CENTER, CENTER);
@@ -137,12 +155,17 @@ function setup() {
   buildPlainCodeLayer();
   renderZonesText(0);
   fitCanvas();
-  console.info("Interaction3 seed:", SEED, "complexity:", COMPLEXITY.toFixed(2));
+  console.info(
+    "Interaction3 seed:",
+    SEED,
+    "complexity:",
+    COMPLEXITY.toFixed(2),
+  );
 }
 
 function draw() {
   const targetT = transformStep / MAX_TRANSFORM_STEP;
-  transformVisualT = lerp(transformVisualT, targetT, 0.22);
+  transformVisualT = lerp(transformVisualT, targetT, TRANSFORM_EASE);
   if (abs(transformVisualT - targetT) < 0.001) transformVisualT = targetT;
   const t = getTransformT();
 
@@ -215,7 +238,8 @@ function updateDragonKinematics(targetX, targetY) {
 
 function updateZones() {
   const t = getTransformT();
-  if (frameCount % 3 === 0) updateZoneList(sceneConfig.bgFrags, 0.3, 0.8, 0, 0.1, 0.9, 1.0);
+  if (frameCount % 3 === 0)
+    updateZoneList(sceneConfig.bgFrags, 0.3, 0.8, 0, 0.1, 0.9, 1.0);
   updateZoneList(zones, 0.28, 1.05, 0.45, 0.14, 0.86, 0.98);
   if (t > 0.5) {
     for (const z of zones) {
@@ -227,13 +251,25 @@ function updateZones() {
 
 function updateZoneList(list, baseE, eMul, tMul, ss0, ss1, lrMul) {
   for (const z of list) {
-    const inf = zoneInf(dragonX, dragonY, z.center[0], z.center[1], z.radius[0], z.radius[1]);
+    const inf = zoneInf(
+      dragonX,
+      dragonY,
+      z.center[0],
+      z.center[1],
+      z.radius[0],
+      z.radius[1],
+    );
     const str = constrain(inf * (baseE + energy * eMul) + turn * tMul, 0, 1);
     const fh = ss(ss0, ss1, str);
 
     z.currentStrength = str;
     z.glowLevel = approachReactive(z.glowLevel, str, ZONE_ATTACK, ZONE_RELEASE);
-    z.fractureLevel = approachReactive(z.fractureLevel, fh, ZONE_ATTACK, ZONE_RELEASE);
+    z.fractureLevel = approachReactive(
+      z.fractureLevel,
+      fh,
+      ZONE_ATTACK,
+      ZONE_RELEASE,
+    );
 
     if (z.shards) {
       for (const s of z.shards) {
@@ -241,7 +277,12 @@ function updateZoneList(list, baseE, eMul, tMul, ss0, ss1, lrMul) {
         const lr = max(z.radius[0], z.radius[1]) * lrMul;
         const hf = constrain(1 - hd / lr, 0, 1);
         const target = max(0, fh * 0.72 + hf * 0.82 - s.threshold);
-        s.activation = approachReactive(s.activation, target, SHARD_ATTACK, SHARD_RELEASE);
+        s.activation = approachReactive(
+          s.activation,
+          target,
+          SHARD_ATTACK,
+          SHARD_RELEASE,
+        );
       }
     }
 
@@ -253,7 +294,10 @@ function updateZoneRegroup(z) {
   if (!z.shards || z.shards.length === 0) return;
 
   z.regroupCooldown = max(0, (z.regroupCooldown || 0) - 1);
-  const fractureSignal = max(z.fractureLevel || 0, (z.currentStrength || 0) * 0.82);
+  const fractureSignal = max(
+    z.fractureLevel || 0,
+    (z.currentStrength || 0) * 0.82,
+  );
   if (fractureSignal > REGROUP_BREAK_THRESHOLD) z.wasFractured = true;
 
   const prevFrac = z.prevFractureLevel || 0;
@@ -285,8 +329,10 @@ function renderZonesText(t = getTransformT()) {
   zoneLayer.clear();
   zoneLayer.push();
   zoneLayer.textFont("Courier New");
-  for (const f of sceneConfig.bgFrags) drawZoneText(zoneLayer, f, true, true, t);
-  for (const p of sceneConfig.panels) drawZoneText(zoneLayer, p, false, false, t);
+  for (const f of sceneConfig.bgFrags)
+    drawZoneText(zoneLayer, f, true, true, t);
+  for (const p of sceneConfig.panels)
+    drawZoneText(zoneLayer, p, false, false, t);
   zoneLayer.pop();
 }
 
@@ -294,21 +340,36 @@ function buildBgFragTextLayer() {
   bgFragLayer.clear();
   bgFragLayer.push();
   bgFragLayer.textFont("Courier New");
-  for (const f of sceneConfig.bgFrags) drawZoneText(bgFragLayer, f, true, true, 0, true);
+  for (const f of sceneConfig.bgFrags)
+    drawZoneText(bgFragLayer, f, true, true, 0, true);
   bgFragLayer.pop();
 }
 
-function drawZoneText(g, z, subtle, staticMode = false, t = 0, staticBuild = false) {
+function drawZoneText(
+  g,
+  z,
+  subtle,
+  staticMode = false,
+  t = 0,
+  staticBuild = false,
+) {
   const b = getZoneBounds(z);
   const area = max(100, b.w * b.h);
-  const fs = constrain(map(area, 2200, 90000, 8, staticMode ? 22 : 28), 8, staticMode ? 24 : 34);
+  const fs = constrain(
+    map(area, 2200, 90000, 8, staticMode ? 22 : 28),
+    8,
+    staticMode ? 24 : 34,
+  );
   const stepY = fs * (staticMode ? 1.16 : 1.05);
-  const ep = staticBuild ? 0 : elementProgress(t, z.composeIndex || 0, subtle ? 0.07 : 0);
+  const ep = staticBuild
+    ? 0
+    : elementProgress(t, z.composeIndex || 0, subtle ? 0.07 : 0);
   const colorLoss = stageColorLoss(ep);
   const shapeLoss = stageShapeLoss(ep);
   const moveLoss = stageMoveLoss(ep);
   const alphaBase = subtle ? 60 : 92;
-  const alphaRaw = (alphaBase + z.glowLevel * 72) * (1 - ss(0.9, 1.0, moveLoss) * 0.9);
+  const alphaRaw =
+    (alphaBase + z.glowLevel * 72) * (1 - ss(0.9, 1.0, moveLoss) * 0.9);
   const alpha = lerp(alphaRaw, 220, moveLoss);
   const target = getComposeTarget(z.composeIndex || 0);
 
@@ -325,16 +386,31 @@ function drawZoneText(g, z, subtle, staticMode = false, t = 0, staticBuild = fal
 
   let line = 0;
   const lineBudget = max(1, floor(lerp(6, 1, shapeLoss)));
-  for (let y = b.minY + fs * 0.7; y <= b.maxY - fs * 0.4 && line < lineBudget; y += stepY) {
+  for (
+    let y = b.minY + fs * 0.7;
+    y <= b.maxY - fs * 0.4 && line < lineBudget;
+    y += stepY
+  ) {
     const earlySnippet = line % 2 === 0 ? snippetA : snippetB;
-    const finalSnippet = lineFromSource(`${snippetA} ${snippetB}`, (z.composeIndex || 0) + line, 58);
+    const finalSnippet = lineFromSource(
+      `${snippetA} ${snippetB}`,
+      (z.composeIndex || 0) + line,
+      58,
+    );
     const snippet = shapeLoss < 0.5 ? earlySnippet : finalSnippet;
-    const c = morphColorToPlain(lerpColor(color(z.fill), color(z.tint), mixAmt), colorLoss + moveLoss * 0.22);
+    const c = morphColorToPlain(
+      lerpColor(color(z.fill), color(z.tint), mixAmt),
+      colorLoss + moveLoss * 0.22,
+    );
     const shadow = color(35, 22, 62, 110 + z.glowLevel * 70);
     c.setAlpha(alpha);
     const drawX = lerp(z.center[0], target.x + 6, moveLoss);
     const drawY = lerp(y, target.y + line * 16, moveLoss);
-    const varSize = fs + sin(frameCount * 0.02 + line) * (staticMode ? 0.35 : 0.8) * (1 - shapeLoss * 0.7);
+    const varSize =
+      fs +
+      sin(frameCount * 0.02 + line) *
+        (staticMode ? 0.35 : 0.8) *
+        (1 - shapeLoss * 0.7);
     g.textSize(lerp(varSize, 12, moveLoss));
     if (!staticMode && shapeLoss < 0.7) {
       g.fill(shadow);
@@ -352,7 +428,11 @@ function drawZoneText(g, z, subtle, staticMode = false, t = 0, staticBuild = fal
 
   if (!staticMode && ep < 0.72 && z.shards && z.shards.length > 0) {
     for (const s of z.shards) {
-      const act = constrain((s.activation || 0) * 0.78 + z.fractureLevel * 0.22, 0, 1);
+      const act = constrain(
+        (s.activation || 0) * 0.78 + z.fractureLevel * 0.22,
+        0,
+        1,
+      );
       if (act <= 0.01) continue;
       const off = act * 34 * (0.55 + s.depth * 0.95);
       const sx = s.centroid.x + s.dir.x * off;
@@ -385,15 +465,29 @@ function paintPulsesText(t = getTransformT()) {
     const shapeLoss = stageShapeLoss(ep);
     const moveLoss = stageMoveLoss(ep);
     const target = getComposeTarget(z.composeIndex || 0);
-    const inf = zoneInf(dragonX, dragonY, z.center[0], z.center[1], z.radius[0], z.radius[1]);
+    const inf = zoneInf(
+      dragonX,
+      dragonY,
+      z.center[0],
+      z.center[1],
+      z.radius[0],
+      z.radius[1],
+    );
     const str = constrain(inf * (0.28 + energy * 1.05) + turn * 0.45, 0, 1);
     if (str < 0.02) continue;
 
-    const text = pickPulseToken(z.pulseSnippet || "zoneInf(dragonX, dragonY, cx, cy, rx, ry)");
-    const c = morphColorToPlain(color(z.tint || z.fill || random(PAL_GLOW)), colorLoss);
+    const text = pickPulseToken(
+      z.pulseSnippet || "zoneInf(dragonX, dragonY, cx, cy, rx, ry)",
+    );
+    const c = morphColorToPlain(
+      color(z.tint || z.fill || random(PAL_GLOW)),
+      colorLoss,
+    );
     c.setAlpha(lerp((40 + str * 130) * (1 - moveLoss * 0.95), 200, moveLoss));
     pulseLayer.fill(c);
-    pulseLayer.textSize(lerp(11 + str * 16 * (1 - shapeLoss * 0.75), 12, moveLoss));
+    pulseLayer.textSize(
+      lerp(11 + str * 16 * (1 - shapeLoss * 0.75), 12, moveLoss),
+    );
 
     const rings = max(1, floor(map(str, 0, 1, 1, 5) * (1 - shapeLoss * 0.72)));
     for (let i = 0; i < rings; i++) {
@@ -428,7 +522,9 @@ function paintTrailText() {
       y: py,
       rot: ang + random(-0.85, 0.85),
       tokens: buildTrailTokens(),
-      points: buildTrailGlyphPoints(random(4 + COMPLEXITY * 4, 7 + COMPLEXITY * 9)),
+      points: buildTrailGlyphPoints(
+        random(4 + COMPLEXITY * 4, 7 + COMPLEXITY * 9),
+      ),
       size: random(7, 18),
       maxAge: floor(random(TRACE_LIFE_MIN, TRACE_LIFE_MAX)),
       age: 0,
@@ -466,20 +562,43 @@ function paintTrailText() {
     trailLayer.fill(c);
     trailLayer.noStroke();
     const glyphScale = p.size * (0.55 + fade * 0.75);
-    const step = max(1, floor((p.age > p.maxAge * 0.45 ? (COMPLEXITY < 0.55 ? 3 : 2) : (COMPLEXITY < 0.42 ? 2 : 1)) + shapeLoss * 2));
+    const step = max(
+      1,
+      floor(
+        (p.age > p.maxAge * 0.45
+          ? COMPLEXITY < 0.55
+            ? 3
+            : 2
+          : COMPLEXITY < 0.42
+            ? 2
+            : 1) +
+          shapeLoss * 2,
+      ),
+    );
     if (shapeLoss > 0.68) {
       trailLayer.textAlign(LEFT, TOP);
       trailLayer.textSize(lerp(max(8, glyphScale * 0.7), 12, moveLoss));
-      trailLayer.text(lineFromSource(p.tokens.join(" "), p.composeIndex, 34), 0, 0);
+      trailLayer.text(
+        lineFromSource(p.tokens.join(" "), p.composeIndex, 34),
+        0,
+        0,
+      );
       trailLayer.textAlign(CENTER, CENTER);
     } else {
       for (let i = 0; i < p.points.length; i += step) {
         const pt = p.points[i];
         const token = p.tokens[i % p.tokens.length];
         trailLayer.push();
-        trailLayer.translate(pt.x * glyphScale, pt.y * glyphScale * (1 - shapeLoss));
-        trailLayer.rotate((pt.a + sin(frameCount * 0.04 + i) * 0.15) * (1 - shapeLoss));
-        trailLayer.textSize(lerp(glyphScale * (0.55 + pt.w * 0.75), 12, moveLoss));
+        trailLayer.translate(
+          pt.x * glyphScale,
+          pt.y * glyphScale * (1 - shapeLoss),
+        );
+        trailLayer.rotate(
+          (pt.a + sin(frameCount * 0.04 + i) * 0.15) * (1 - shapeLoss),
+        );
+        trailLayer.textSize(
+          lerp(glyphScale * (0.55 + pt.w * 0.75), 12, moveLoss),
+        );
         trailLayer.text(token, 0, 0);
         trailLayer.pop();
       }
@@ -508,9 +627,10 @@ function buildBackgroundText() {
     const top = color(sceneConfig.gradient.top);
     const mid = color(sceneConfig.gradient.mid);
     const bot = color(sceneConfig.gradient.bottom);
-    const col = t < 0.5
-      ? lerpColor(top, mid, t / 0.5)
-      : lerpColor(mid, bot, (t - 0.5) / 0.5);
+    const col =
+      t < 0.5
+        ? lerpColor(top, mid, t / 0.5)
+        : lerpColor(mid, bot, (t - 0.5) / 0.5);
 
     const shadow = color(30, 16, 54, 96);
     col.setAlpha(112);
@@ -600,7 +720,15 @@ function generateScene() {
       });
     }
 
-    const col = random(["#efe4ff", "#d6d0ff", "#caebff", "#dbcaff", "#d8c9ff", "#cfe7ff", "#f0d2ff"]);
+    const col = random([
+      "#efe4ff",
+      "#d6d0ff",
+      "#caebff",
+      "#dbcaff",
+      "#d8c9ff",
+      "#cfe7ff",
+      "#f0d2ff",
+    ]);
     cfg.bgFrags.push(
       initZoneState({
         kind: "poly",
@@ -615,17 +743,24 @@ function generateScene() {
         snippet: pickSnippet(),
         snippet2: pickSnippet(),
         composeIndex: i % CODE_SLOT_MOD,
-      })
+      }),
     );
   }
 
   const panelCount = PANEL_COUNT;
   const largeCount = min(panelCount - 1, floor(2 + COMPLEXITY * 3));
-  const ambientCount = floor(random(max(2, panelCount * 0.34), panelCount * 0.58 + 1));
+  const ambientCount = floor(
+    random(max(2, panelCount * 0.34), panelCount * 0.58 + 1),
+  );
 
   const panelAnchors = [];
   for (let i = 0; i < panelCount; i++) {
-    const panel = buildRandomPanel(panelAnchors, i < largeCount, cfg.gradient, i < ambientCount);
+    const panel = buildRandomPanel(
+      panelAnchors,
+      i < largeCount,
+      cfg.gradient,
+      i < ambientCount,
+    );
     panel.composeIndex = (i + BG_FRAG_COUNT) % CODE_SLOT_MOD;
     cfg.panels.push(panel);
     cfg.reactiveZones.push(panel);
@@ -712,7 +847,10 @@ function mkZone(kind, p) {
     const xs = z.points.map((pt) => pt.x);
     const ys = z.points.map((pt) => pt.y);
     z.center = [(min(xs) + max(xs)) * 0.5, (min(ys) + max(ys)) * 0.5];
-    z.radius = [max((max(xs) - min(xs)) * 0.62, 96), max((max(ys) - min(ys)) * 0.62, 86)];
+    z.radius = [
+      max((max(xs) - min(xs)) * 0.62, 96),
+      max((max(ys) - min(ys)) * 0.62, 86),
+    ];
   }
   return initZoneState(z);
 }
@@ -801,7 +939,8 @@ function zoneClip(g, z) {
 
   if (z.kind === "poly") {
     ctx.moveTo(z.points[0].x, z.points[0].y);
-    for (let i = 1; i < z.points.length; i++) ctx.lineTo(z.points[i].x, z.points[i].y);
+    for (let i = 1; i < z.points.length; i++)
+      ctx.lineTo(z.points[i].x, z.points[i].y);
     ctx.closePath();
   } else {
     const b = getZoneBounds(z);
@@ -869,10 +1008,14 @@ function colorToHex(c) {
 
 function morphColorToPlain(c, t) {
   const col = color(c);
-  const gray = (red(col) * 0.299 + green(col) * 0.587 + blue(col) * 0.114);
+  const gray = red(col) * 0.299 + green(col) * 0.587 + blue(col) * 0.114;
   const gCol = color(gray, gray, gray);
   const kCol = color(0, 0, 0);
-  return lerpColor(lerpColor(col, gCol, ss(0.08, 0.86, t)), kCol, ss(0.72, 1, t));
+  return lerpColor(
+    lerpColor(col, gCol, ss(0.08, 0.86, t)),
+    kCol,
+    ss(0.72, 1, t),
+  );
 }
 
 function getTransformT() {
@@ -899,7 +1042,8 @@ function buildComposeTargets() {
 }
 
 function getComposeTarget(index) {
-  if (composeTargets.length === 0) return { x: 22, y: 34, line: "const line = token;", index: 0 };
+  if (composeTargets.length === 0)
+    return { x: 22, y: 34, line: "const line = token;", index: 0 };
   return composeTargets[index % composeTargets.length];
 }
 
@@ -926,7 +1070,10 @@ function stableHash(n) {
 }
 
 function lineFromSource(source, idx, targetChars = 48) {
-  const words = source.replace(/[^\w\[\]\(\)\{\};=<>+\-*\/]/g, " ").split(/\s+/).filter(Boolean);
+  const words = source
+    .replace(/[^\w\[\]\(\)\{\};=<>+\-*\/]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
   const pool = words.length > 0 ? words : TRAIL_TOKEN_POOL;
   let out = "";
   let k = 0;
@@ -955,7 +1102,10 @@ function buildTrailTokens() {
 }
 
 function pickPulseToken(text) {
-  const token = text.replace(/[,\.;:{}]/g, " ").split(/\s+/).find(Boolean);
+  const token = text
+    .replace(/[,\.;:{}]/g, " ")
+    .split(/\s+/)
+    .find(Boolean);
   return token || "zoneInf";
 }
 
@@ -1004,7 +1154,9 @@ function windowResized() {
 function keyPressed() {
   if (!canvasRef || !canvasRef.elt) return true;
   if (key === " ") {
-    transformStep = min(transformStep + 1, MAX_TRANSFORM_STEP);
+    const tTarget = transformStep / MAX_TRANSFORM_STEP;
+    const stepDelta = tTarget < PRECHANGE_T ? KEY_STEP_EARLY : KEY_STEP_LATE;
+    transformStep = min(transformStep + stepDelta, MAX_TRANSFORM_STEP);
     return false;
   }
   if (key === "s" || key === "S") {
