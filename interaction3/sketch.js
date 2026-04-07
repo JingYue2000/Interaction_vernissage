@@ -7,8 +7,8 @@ const SETTINGS = {
   complexity: 0.3,
   preChangeT: 0.18,
   stageEase: 0.22,
-  stage1Steps: 10,
-  stage2Steps: 10,
+  stage1Steps: 5,
+  stage2Steps: 5,
   stage3Steps: 10,
 };
 
@@ -1463,11 +1463,7 @@ window.addEventListener("message", (evt) => {
   }
 
   if (data.type === "setHandoffStep") {
-    __vernHandoffStep = constrain(
-      Math.round(Number(data.step) || 0),
-      0,
-      9999,
-    );
+    __vernHandoffStep = constrain(Math.round(Number(data.step) || 0), 0, 9999);
     __vernHandoffTotal = max(1, Math.round(Number(data.total) || 8));
     fitCanvas();
     return;
