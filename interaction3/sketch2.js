@@ -50,6 +50,9 @@ const STAGE_TOTAL_STEPS = STAGE1_STEPS + STAGE2_STEPS + STAGE3_STEPS;
 const MOUNTAIN_COUNT = 800;
 const BG_TOKEN_COUNT = Math.floor(220 + COMPLEXITY * 240);
 const PAGE_BG_START = "#000000";
+const MOUNTAIN_RENDER_SCALE = 0.5;
+const BG_RENDER_INTERVAL = 2;
+const MOUNTAIN_RENDER_INTERVAL = 2;
 
 const CODE_SNIPPETS = [
   "const C = Math.cos;",
@@ -74,15 +77,19 @@ let bgTokens = [];
 
 let stageStep = 0;
 let stageVisual = 0;
+let lastBgStyle = "";
 
 function setup() {
-  pixelDensity(min(window.devicePixelRatio || 1, 2));
+  pixelDensity(1);
   canvasRef = createCanvas(W, H);
-  frameRate(60);
+  frameRate(30);
   smooth();
 
   bgLayer = createGraphics(W, H);
-  mountainLayer = createGraphics(W, H);
+  mountainLayer = createGraphics(
+    Math.floor(W * MOUNTAIN_RENDER_SCALE),
+    Math.floor(H * MOUNTAIN_RENDER_SCALE),
+  );
 
   [bgLayer, mountainLayer].forEach((l) => {
     l.smooth();
@@ -105,6 +112,7 @@ function draw() {
   const stageTarget = stageStep / STAGE_TOTAL_STEPS;
   stageVisual = lerp(stageVisual, stageTarget, STAGE_EASE);
   if (abs(stageVisual - stageTarget) < 0.001) stageVisual = stageTarget;
+  const stageAnimating = abs(stageVisual - stageTarget) > 0.0005;
 
   const { s1, s2, s3 } = getStageProgress(stageVisual);
   const morph = s1;
@@ -114,15 +122,23 @@ function draw() {
 
   updatePageBackground(stage2BgFade);
 
-  bgLayer.clear();
-  mountainLayer.clear();
+  const redrawBg = frameCount % BG_RENDER_INTERVAL === 0;
+  const redrawMountain =
+    frameCount % MOUNTAIN_RENDER_INTERVAL === 0 || stageAnimating;
 
-  drawBackgroundMatter(t, morph, stage2BgFade, activeRatio);
-  drawMountainMatter(t, morph, activeRatio);
+  if (redrawBg) bgLayer.clear();
+  if (redrawMountain) mountainLayer.clear();
+
+  if (redrawBg) {
+    drawBackgroundMatter(t, morph, stage2BgFade, activeRatio);
+  }
+  if (redrawMountain) {
+    drawMountainMatter(t, morph, activeRatio);
+  }
 
   background(255);
   image(bgLayer, 0, 0);
-  image(mountainLayer, 0, 0);
+  image(mountainLayer, 0, 0, W, H);
 }
 
 function drawBackgroundMatter(t, morph, stage2BgFade, activeRatio) {
@@ -182,6 +198,7 @@ function drawMountainMatter(t, morph, activeRatio) {
 
   const mt = millis() * 0.001;
   const codeAppear = ss(0.06, 0.9, morph);
+  const rs = MOUNTAIN_RENDER_SCALE;
 
   for (const el of mountainElements) {
     if (el.keepRank > activeRatio) continue;
@@ -198,20 +215,19 @@ function drawMountainMatter(t, morph, activeRatio) {
     const baseSize = max(2, i * 2);
 
     const target = getComposeTarget(el.composeIndex);
-    const px = lerp(tx, target.x + el.tx, moveLoss);
-    const py = lerp(ty, target.y + el.ty, moveLoss);
+    const px = lerp(tx, target.x + el.tx, moveLoss) * rs;
+    const py = lerp(ty, target.y + el.ty, moveLoss) * rs;
     const rot = lerp(ang, 0, shapeLoss);
 
     if (morph < 1) {
-      const srcCol = color(el.r, el.g, el.b, 255 * el.a * (1 - morph));
       const drawSize = lerp(baseSize, 13, shapeLoss * 0.8 + moveLoss * 0.2);
       mountainLayer.push();
       mountainLayer.translate(px, py);
       mountainLayer.rotate(rot);
       mountainLayer.rectMode(CENTER);
       mountainLayer.noStroke();
-      mountainLayer.fill(srcCol);
-      mountainLayer.rect(0, 0, drawSize, drawSize);
+      mountainLayer.fill(el.r, el.g, el.b, 255 * el.a * (1 - morph));
+      mountainLayer.rect(0, 0, drawSize * rs, drawSize * rs);
       mountainLayer.pop();
     }
 
@@ -228,7 +244,7 @@ function drawMountainMatter(t, morph, activeRatio) {
     mountainLayer.rotate(rot * (1 - shapeLoss));
     mountainLayer.fill(tc);
     mountainLayer.textSize(
-      lerp(max(8, baseSize * 0.15), 12, shapeLoss * 0.84 + moveLoss * 0.16),
+      lerp(max(8, baseSize * 0.15), 12, shapeLoss * 0.84 + moveLoss * 0.16) * rs,
     );
 
     const text =
@@ -384,6 +400,8 @@ function morphColorToPlain(c, t) {
 function updatePageBackground(stage2Fade) {
   const c = lerpColor(color(PAGE_BG_START), color("#ffffff"), stage2Fade);
   const css = `rgb(${round(red(c))}, ${round(green(c))}, ${round(blue(c))})`;
+  if (css === lastBgStyle) return;
+  lastBgStyle = css;
   document.documentElement.style.background = css;
   document.body.style.background = css;
 }
