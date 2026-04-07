@@ -4,17 +4,16 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 const SETTINGS = {
   seed: null,
-  complexity: 0.58,
-  keyStepEarly: 500,
-  keyStepLate: 2,
+  complexity: 0.1,
   preChangeT: 0.18,
-  transformEase: 0.22,
+  stageEase: 0.22,
+  stage1Steps: 500,
+  stage2Steps: 500,
+  stage3Steps: 42,
 };
 
 const HAS_CUSTOM_SEED =
-  SETTINGS.seed !== null &&
-  SETTINGS.seed !== undefined &&
-  SETTINGS.seed !== "";
+  SETTINGS.seed !== null && SETTINGS.seed !== undefined && SETTINGS.seed !== "";
 const SEED =
   HAS_CUSTOM_SEED && Number.isFinite(Number(SETTINGS.seed))
     ? Number(SETTINGS.seed)
@@ -52,11 +51,21 @@ const PANEL_COUNT = Math.floor(6 + COMPLEXITY * 12);
 const GRAIN_COUNT = Math.floor(900 + COMPLEXITY * 1700);
 
 const DRAGON_FOLLOW_LERP = 0.22;
-const MAX_TRANSFORM_STEP = 120;
-const KEY_STEP_EARLY = clamp(Number(SETTINGS.keyStepEarly), 1, 24);
-const KEY_STEP_LATE = clamp(Number(SETTINGS.keyStepLate), 1, 12);
 const PRECHANGE_T = clamp(Number(SETTINGS.preChangeT), 0.02, 0.6);
-const TRANSFORM_EASE = clamp(Number(SETTINGS.transformEase), 0.08, 0.45);
+const STAGE_EASE = clamp(Number(SETTINGS.stageEase), 0.05, 0.45);
+const STAGE1_STEPS = Math.max(
+  1,
+  Math.floor(Number(SETTINGS.stage1Steps) || 20),
+);
+const STAGE2_STEPS = Math.max(
+  1,
+  Math.floor(Number(SETTINGS.stage2Steps) || 18),
+);
+const STAGE3_STEPS = Math.max(
+  1,
+  Math.floor(Number(SETTINGS.stage3Steps) || 42),
+);
+const STAGE_TOTAL_STEPS = STAGE1_STEPS + STAGE2_STEPS + STAGE3_STEPS;
 
 const CODE_SNIPPETS = [
   "const W = 720, H = 1020;",
@@ -98,6 +107,7 @@ const CODE_SLOT_MOD = 240;
 
 let canvasRef;
 let bgLayer;
+let bgBaseLayer;
 let bgFragLayer;
 let zoneLayer;
 let pulseLayer;
@@ -118,8 +128,8 @@ let heading = 0;
 let speed = 0;
 let turn = 0;
 let energy = 0;
-let transformStep = 0;
-let transformVisualT = 0;
+let stageStep = 0;
+let stageVisual = 0;
 
 function setup() {
   pixelDensity(min(window.devicePixelRatio || 1, 2));
@@ -128,6 +138,7 @@ function setup() {
   smooth();
 
   bgLayer = createGraphics(W, H);
+  bgBaseLayer = createGraphics(W, H);
   bgFragLayer = createGraphics(W, H);
   zoneLayer = createGraphics(W, H);
   pulseLayer = createGraphics(W, H);
@@ -137,6 +148,7 @@ function setup() {
 
   [
     bgLayer,
+    bgBaseLayer,
     bgFragLayer,
     zoneLayer,
     pulseLayer,
@@ -159,7 +171,7 @@ function setup() {
   buildBgFragTextLayer();
   buildGrainText();
   buildPlainCodeLayer();
-  renderZonesText(0);
+  renderZonesText(0, 0);
   fitCanvas();
   console.info(
     "Interaction3 seed:",
@@ -170,23 +182,26 @@ function setup() {
 }
 
 function draw() {
-  const targetT = transformStep / MAX_TRANSFORM_STEP;
-  transformVisualT = lerp(transformVisualT, targetT, TRANSFORM_EASE);
-  if (abs(transformVisualT - targetT) < 0.001) transformVisualT = targetT;
-  const t = getTransformT();
+  const stageTarget = stageStep / STAGE_TOTAL_STEPS;
+  stageVisual = lerp(stageVisual, stageTarget, STAGE_EASE);
+  if (abs(stageVisual - stageTarget) < 0.001) stageVisual = stageTarget;
+  const { s1, s2, s3 } = getStageProgress(stageVisual);
+  const morph = s1;
+  const t = s1 < 1 ? 0 : s2 < 1 ? PRECHANGE_T * s2 : lerp(PRECHANGE_T, 1, s3);
 
   updateDragon();
   updateZones();
 
-  if (frameCount % ZONE_REDRAW_INTERVAL === 0) renderZonesText(t);
+  if (frameCount % ZONE_REDRAW_INTERVAL === 0) renderZonesText(t, morph);
   fadeAlpha(pulseLayer, 20 + t * 16);
-  if (frameCount % PULSE_REDRAW_INTERVAL === 0) paintPulsesText(t);
-  paintTrailText();
+  if (frameCount % PULSE_REDRAW_INTERVAL === 0) paintPulsesText(t, morph);
+  paintTrailText(morph, t);
 
   background(255);
+  image(bgBaseLayer, 0, 0);
   const bgFade = getGlobalColorLoss(t);
   push();
-  tint(255, 255 * (1 - bgFade));
+  tint(255, 255 * morph * (1 - bgFade));
   image(bgLayer, 0, 0);
   pop();
   image(zoneLayer, 0, 0);
@@ -331,14 +346,14 @@ function updateZoneRegroup(z) {
   z.prevFractureLevel = z.fractureLevel;
 }
 
-function renderZonesText(t = getTransformT()) {
+function renderZonesText(t = getTransformT(), morph = 1) {
   zoneLayer.clear();
   zoneLayer.push();
   zoneLayer.textFont("Courier New");
   for (const f of sceneConfig.bgFrags)
-    drawZoneText(zoneLayer, f, true, true, t);
+    drawZoneText(zoneLayer, f, true, true, t, false, morph);
   for (const p of sceneConfig.panels)
-    drawZoneText(zoneLayer, p, false, false, t);
+    drawZoneText(zoneLayer, p, false, false, t, false, morph);
   zoneLayer.pop();
 }
 
@@ -347,7 +362,7 @@ function buildBgFragTextLayer() {
   bgFragLayer.push();
   bgFragLayer.textFont("Courier New");
   for (const f of sceneConfig.bgFrags)
-    drawZoneText(bgFragLayer, f, true, true, 0, true);
+    drawZoneText(bgFragLayer, f, true, true, 0, true, 1);
   bgFragLayer.pop();
 }
 
@@ -358,6 +373,7 @@ function drawZoneText(
   staticMode = false,
   t = 0,
   staticBuild = false,
+  morph = 1,
 ) {
   const b = getZoneBounds(z);
   const area = max(100, b.w * b.h);
@@ -376,13 +392,33 @@ function drawZoneText(
   const alphaBase = subtle ? 60 : 92;
   const alphaRaw =
     (alphaBase + z.glowLevel * 72) * (1 - ss(0.9, 1.0, moveLoss) * 0.9);
-  const alpha = lerp(alphaRaw, 220, moveLoss);
+  const alpha = lerp(alphaRaw, 220, moveLoss) * morph;
   const target = getComposeTarget(z.composeIndex || 0);
 
   const snippetA = z.snippet || pickSnippet();
   const snippetB = z.snippet2 || pickSnippet();
   const mixAmt = z.fractureLevel;
   const useClip = !staticBuild && shapeLoss < 0.52;
+  const baseFill = lerpColor(
+    color(z.fill),
+    color(z.tint),
+    0.24 + z.glowLevel * 0.18,
+  );
+  const baseStroke = lerpColor(color(z.tint), color("#4d3f76"), 0.24);
+
+  if (!staticBuild && morph < 1) {
+    g.push();
+    baseFill.setAlpha((subtle ? 54 : 96) * (1 - morph));
+    baseStroke.setAlpha((subtle ? 16 : 34) * (1 - morph));
+    g.noStroke();
+    g.fill(baseFill);
+    drawPoly(g, z.points);
+    g.noFill();
+    g.stroke(baseStroke);
+    g.strokeWeight(subtle ? 0.7 : 0.95);
+    drawPoly(g, z.points);
+    g.pop();
+  }
 
   g.push();
   if (useClip) zoneClip(g, z);
@@ -409,11 +445,11 @@ function drawZoneText(
       colorLoss + moveLoss * 0.22,
     );
     const shadow = color(35, 22, 62, 110 + z.glowLevel * 70);
-    c.setAlpha(alpha);
+    c.setAlpha(alpha * morph);
     const drawX = lerp(z.center[0], target.x + 6, moveLoss);
     const drawY = lerp(y, target.y + line * 16, moveLoss);
     const varSize =
-      fs +
+      lerp(fs * 1.65, fs, morph) +
       sin(frameCount * 0.02 + line) *
         (staticMode ? 0.35 : 0.8) *
         (1 - shapeLoss * 0.7);
@@ -459,7 +495,7 @@ function drawZoneText(
   }
 }
 
-function paintPulsesText(t = getTransformT()) {
+function paintPulsesText(t = getTransformT(), morph = 1) {
   pulseLayer.push();
   pulseLayer.textFont("Courier New");
   pulseLayer.textAlign(CENTER, CENTER);
@@ -489,7 +525,9 @@ function paintPulsesText(t = getTransformT()) {
       color(z.tint || z.fill || random(PAL_GLOW)),
       colorLoss,
     );
-    c.setAlpha(lerp((40 + str * 130) * (1 - moveLoss * 0.95), 200, moveLoss));
+    c.setAlpha(
+      lerp((40 + str * 130) * (1 - moveLoss * 0.95), 200, moveLoss) * morph,
+    );
     pulseLayer.fill(c);
     pulseLayer.textSize(
       lerp(11 + str * 16 * (1 - shapeLoss * 0.75), 12, moveLoss),
@@ -510,9 +548,7 @@ function paintPulsesText(t = getTransformT()) {
   pulseLayer.pop();
 }
 
-function paintTrailText() {
-  const t = getTransformT();
-  const morph = t;
+function paintTrailText(morph = 1, t = getTransformT()) {
   const ang = atan2(dragonY - lastDY, dragonX - lastDX);
   const na = ang + HALF_PI;
   const bs = map(sin(frameCount / 11), -1, 1, 34, 92);
@@ -532,6 +568,7 @@ function paintTrailText() {
       points: buildTrailGlyphPoints(
         random(4 + COMPLEXITY * 4, 7 + COMPLEXITY * 9),
       ),
+      polyPts: buildStartPolyPoints(random(5, 18)),
       size: random(7, 18),
       maxAge: floor(random(TRACE_LIFE_MIN, TRACE_LIFE_MAX)),
       age: 0,
@@ -586,9 +623,30 @@ function paintTrailText() {
     trailLayer.push();
     trailLayer.translate(px, py);
     trailLayer.rotate(lerp(p.rot, 0, shapeLoss));
+    const glyphScale = p.size * (0.55 + fade * 0.75);
+    const polyScale = lerp(0.72, 1.0, morph);
+    const polyFade = 1 - ss(0.12, 0.84, morph);
+    const textAppear = ss(0.0, 0.72, morph);
+
+    if (polyFade > 0.01) {
+      const polyFill = color(c);
+      polyFill.setAlpha(alpha(c) * polyFade);
+      const polyStroke = color(255);
+      polyStroke.setAlpha((22 + 30 * fade) * polyFade);
+      trailLayer.push();
+      trailLayer.scale(polyScale);
+      trailLayer.noStroke();
+      trailLayer.fill(polyFill);
+      drawPoly(trailLayer, p.polyPts);
+      trailLayer.noFill();
+      trailLayer.stroke(polyStroke);
+      trailLayer.strokeWeight(0.8);
+      drawPoly(trailLayer, p.polyPts);
+      trailLayer.pop();
+    }
+
     trailLayer.fill(c);
     trailLayer.noStroke();
-    const glyphScale = p.size * (0.55 + fade * 0.75);
     const step = max(
       1,
       floor(
@@ -605,6 +663,7 @@ function paintTrailText() {
     if (shapeLoss > 0.68) {
       trailLayer.textAlign(LEFT, TOP);
       trailLayer.textSize(lerp(max(8, glyphScale * 0.7), 12, moveLoss));
+      trailLayer.fill(red(c), green(c), blue(c), alpha(c) * textAppear);
       trailLayer.text(
         lineFromSource(p.tokens.join(" "), p.composeIndex, 34),
         0,
@@ -615,17 +674,27 @@ function paintTrailText() {
       for (let i = 0; i < p.points.length; i += step) {
         const pt = p.points[i];
         const token = p.tokens[i % p.tokens.length];
+        const sp = p.polyPts[i % p.polyPts.length];
         trailLayer.push();
         trailLayer.translate(
-          pt.x * glyphScale,
-          pt.y * glyphScale * (1 - shapeLoss),
+          lerp(sp.x * polyScale, pt.x * glyphScale, morph),
+          lerp(sp.y * polyScale, pt.y * glyphScale * (1 - shapeLoss), morph),
         );
         trailLayer.rotate(
-          (pt.a + sin(frameCount * 0.04 + i) * 0.15) * (1 - shapeLoss),
+          lerp(
+            0,
+            (pt.a + sin(frameCount * 0.04 + i) * 0.15) * (1 - shapeLoss),
+            morph,
+          ),
         );
         trailLayer.textSize(
-          lerp(glyphScale * (0.55 + pt.w * 0.75), 12, moveLoss),
+          lerp(
+            max(8, p.size * 0.45),
+            lerp(glyphScale * (0.55 + pt.w * 0.75), 12, moveLoss),
+            morph,
+          ),
         );
+        trailLayer.fill(red(c), green(c), blue(c), alpha(c) * textAppear);
         trailLayer.text(token, 0, 0);
         trailLayer.pop();
       }
@@ -645,17 +714,20 @@ function paintTrailText() {
 
 function buildBackgroundText() {
   bgLayer.clear();
+  bgBaseLayer.clear();
+  bgBaseLayer.push();
+  const baseGrad = bgBaseLayer.drawingContext.createLinearGradient(0, 0, 0, H);
+  baseGrad.addColorStop(0.0, sceneConfig.gradient.top);
+  baseGrad.addColorStop(0.42, sceneConfig.gradient.mid);
+  baseGrad.addColorStop(1.0, sceneConfig.gradient.bottom);
+  bgBaseLayer.drawingContext.fillStyle = baseGrad;
+  bgBaseLayer.drawingContext.fillRect(0, 0, W, H);
+  bgBaseLayer.pop();
+
   bgLayer.push();
   bgLayer.textFont("Courier New");
   bgLayer.textAlign(CENTER, CENTER);
   bgLayer.noStroke();
-
-  const grad = bgLayer.drawingContext.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0.0, sceneConfig.gradient.top);
-  grad.addColorStop(0.42, sceneConfig.gradient.mid);
-  grad.addColorStop(1.0, sceneConfig.gradient.bottom);
-  bgLayer.drawingContext.fillStyle = grad;
-  bgLayer.drawingContext.fillRect(0, 0, W, H);
 
   for (let y = 0; y < H; y += 22) {
     const t = y / H;
@@ -1054,7 +1126,18 @@ function morphColorToPlain(c, t) {
 }
 
 function getTransformT() {
-  return transformVisualT;
+  const { s1, s2, s3 } = getStageProgress(stageVisual);
+  return s1 < 1 ? 0 : s2 < 1 ? PRECHANGE_T * s2 : lerp(PRECHANGE_T, 1, s3);
+}
+
+function getStageProgress(v) {
+  const p1 = STAGE1_STEPS / STAGE_TOTAL_STEPS;
+  const p2 = (STAGE1_STEPS + STAGE2_STEPS) / STAGE_TOTAL_STEPS;
+  return {
+    s1: constrain(v / p1, 0, 1),
+    s2: constrain((v - p1) / (p2 - p1), 0, 1),
+    s3: constrain((v - p2) / (1 - p2), 0, 1),
+  };
 }
 
 function buildComposeTargets() {
@@ -1146,7 +1229,9 @@ function pickSnippet() {
 
 function pickTrailColor() {
   const hex =
-    random() < 0.6 ? random(PAL_ACCENT_ACTIVE) : random(PAL_TRACE.concat(PAL_GLOW));
+    random() < 0.6
+      ? random(PAL_ACCENT_ACTIVE)
+      : random(PAL_TRACE.concat(PAL_GLOW));
   return color(hex);
 }
 
@@ -1193,6 +1278,25 @@ function buildTrailGlyphPoints(n) {
   return pts.sort(() => random(-1, 1));
 }
 
+function buildStartPolyPoints(baseSize) {
+  const nv = floor(random(3, 6));
+  const pts = [];
+  for (let j = 0; j < nv; j++) {
+    const a = (TWO_PI * j) / nv + random(-0.4, 0.4);
+    pts.push({
+      x: cos(a) * baseSize * random(0.45, 1.0),
+      y: sin(a) * baseSize * random(0.45, 1.0),
+    });
+  }
+  return pts;
+}
+
+function drawPoly(g, pts) {
+  g.beginShape();
+  for (const p of pts) g.vertex(p.x, p.y);
+  g.endShape(CLOSE);
+}
+
 function fitCanvas() {
   if (!canvasRef || !canvasRef.elt) return;
   const wr = window.innerWidth / window.innerHeight;
@@ -1215,9 +1319,7 @@ function windowResized() {
 function keyPressed() {
   if (!canvasRef || !canvasRef.elt) return true;
   if (key === " ") {
-    const tTarget = transformStep / MAX_TRANSFORM_STEP;
-    const stepDelta = tTarget < PRECHANGE_T ? KEY_STEP_EARLY : KEY_STEP_LATE;
-    transformStep = min(transformStep + stepDelta, MAX_TRANSFORM_STEP);
+    if (stageStep < STAGE_TOTAL_STEPS) stageStep += 1;
     return false;
   }
   if (key === "s" || key === "S") {
