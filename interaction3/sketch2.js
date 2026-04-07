@@ -68,6 +68,11 @@ const FINAL_CODE_X = 24;
 const FINAL_CODE_TOP = 32;
 const FINAL_CODE_WIDTH = 1320;
 const TARGETS_PER_LINE = 18;
+const BG_EARLY_CODE_CHARS = 20;
+const MOUNTAIN_EARLY_CODE_CHARS = 24;
+const MOUNTAIN_EARLY_FONT_SCALE = 0.06;
+const MOUNTAIN_EARLY_FONT_MIN = 16;
+const MOUNTAIN_EARLY_FONT_MAX = 64;
 
 const CODE_SNIPPETS = [
   "const C = Math.cos;",
@@ -244,7 +249,7 @@ function drawBackgroundMatter(t, morph, s3, stage2BgFade, activeRatio) {
 
     let text =
       shapeLoss < 0.5
-        ? b.token
+        ? lineFromSource(b.snippet, b.composeIndex + 1, BG_EARLY_CODE_CHARS)
         : lineFromSource(b.snippet, b.composeIndex + 3, 34);
     if (stage3Mix > 0.35) {
       const reveal = Math.max(
@@ -344,8 +349,13 @@ function drawMountainMatter(t, morph, s3, activeRatio) {
     mountainLayer.translate(px, py);
     mountainLayer.rotate(rot * (1 - shapeLoss));
     mountainLayer.fill(tc);
+    const earlyTextSize = constrain(
+      baseSize * MOUNTAIN_EARLY_FONT_SCALE,
+      MOUNTAIN_EARLY_FONT_MIN,
+      MOUNTAIN_EARLY_FONT_MAX,
+    );
     mountainLayer.textSize(
-      (lerp(max(8, baseSize * 0.15), 12, shapeLoss * 0.84 + moveLoss * 0.16) *
+      (lerp(earlyTextSize, 12, shapeLoss * 0.84 + moveLoss * 0.16) *
         (1 - stage3Mix) +
         FINAL_FONT_SIZE * stage3Mix) *
         rs,
@@ -353,7 +363,7 @@ function drawMountainMatter(t, morph, s3, activeRatio) {
 
     let text =
       shapeLoss < 0.52
-        ? el.token
+        ? lineFromSource(el.snippet, el.composeIndex, MOUNTAIN_EARLY_CODE_CHARS)
         : lineFromSource(el.snippet, el.composeIndex, 42);
     if (stage3Mix > 0.35) {
       const reveal = Math.max(
