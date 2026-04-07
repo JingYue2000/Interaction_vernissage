@@ -205,8 +205,7 @@ function setup() {
 
 function draw() {
   const stageTarget = stageStep / STAGE_TOTAL_STEPS;
-  stageVisual = lerp(stageVisual, stageTarget, STAGE_EASE);
-  if (abs(stageVisual - stageTarget) < 0.001) stageVisual = stageTarget;
+  stageVisual = stageTarget;
   const { s1, s2, s3 } = getStageProgress(stageVisual);
   const morph = s1;
   const t = s1 < 1 ? 0 : s2 < 1 ? PRECHANGE_T * s2 : lerp(PRECHANGE_T, 1, s3);
@@ -1399,7 +1398,7 @@ function windowResized() {
 function keyPressed() {
   if (!canvasRef || !canvasRef.elt) return true;
   if (key === " ") {
-    if (stageStep < STAGE_TOTAL_STEPS) stageStep += 1;
+    if (stageStep < STAGE_TOTAL_STEPS) __vernStepStage(1);
     else __vernNotifyWholeAdvance();
     __vernPostWholeStage();
     return false;
@@ -1413,6 +1412,7 @@ function keyPressed() {
 
 function __vernSetStageStep(v) {
   stageStep = constrain(Math.round(v), 0, STAGE_TOTAL_STEPS);
+  stageVisual = stageStep / STAGE_TOTAL_STEPS;
 }
 
 function __vernStepStage(delta) {
