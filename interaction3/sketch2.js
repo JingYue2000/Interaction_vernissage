@@ -9,6 +9,7 @@ const SETTINGS = {
   stage1Steps: 5,
   stage2Steps: 5,
   stage3Steps: 10,
+  elementReductionRate: 1.35,
 };
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -27,6 +28,11 @@ const COMPLEXITY = clamp(Number(SETTINGS.complexity), 0.2, 1.0);
 
 const PRECHANGE_T = clamp(Number(SETTINGS.preChangeT), 0.02, 0.6);
 const STAGE_EASE = clamp(Number(SETTINGS.stageEase), 0.05, 0.45);
+const ELEMENT_REDUCTION_RATE = Math.max(
+  0.05,
+  Number(SETTINGS.elementReductionRate) || 1.35,
+);
+const STAGE3_KEEP_RATIO = 0.24;
 const STAGE1_STEPS = Math.max(
   1,
   Math.floor(Number(SETTINGS.stage1Steps) || 14),
@@ -104,21 +110,22 @@ function draw() {
   const morph = s1;
   const t = s1 < 1 ? 0 : s2 < 1 ? PRECHANGE_T * s2 : lerp(PRECHANGE_T, 1, s3);
   const stage2BgFade = s1 < 1 ? 0 : s2;
+  const activeRatio = getActiveElementRatio();
 
   updatePageBackground(stage2BgFade);
 
   bgLayer.clear();
   mountainLayer.clear();
 
-  drawBackgroundMatter(t, morph, stage2BgFade);
-  drawMountainMatter(t, morph);
+  drawBackgroundMatter(t, morph, stage2BgFade, activeRatio);
+  drawMountainMatter(t, morph, activeRatio);
 
   background(255);
   image(bgLayer, 0, 0);
   image(mountainLayer, 0, 0);
 }
 
-function drawBackgroundMatter(t, morph, stage2BgFade) {
+function drawBackgroundMatter(t, morph, stage2BgFade, activeRatio) {
   const darkness = 1 - stage2BgFade;
   bgLayer.noStroke();
   bgLayer.fill(0, 0, 0, 255 * darkness);
@@ -128,6 +135,7 @@ function drawBackgroundMatter(t, morph, stage2BgFade) {
   bgLayer.textAlign(CENTER, CENTER);
 
   for (const b of bgTokens) {
+    if (b.keepRank > activeRatio) continue;
     const ep = elementProgress(t, b.composeIndex, 0.12);
     const colorLoss = stageColorLoss(ep);
     const shapeLoss = stageShapeLoss(ep);
@@ -167,7 +175,7 @@ function drawBackgroundMatter(t, morph, stage2BgFade) {
   }
 }
 
-function drawMountainMatter(t, morph) {
+function drawMountainMatter(t, morph, activeRatio) {
   mountainLayer.push();
   mountainLayer.textAlign(CENTER, CENTER);
   mountainLayer.noStroke();
@@ -176,6 +184,7 @@ function drawMountainMatter(t, morph) {
   const codeAppear = ss(0.06, 0.9, morph);
 
   for (const el of mountainElements) {
+    if (el.keepRank > activeRatio) continue;
     const ep = elementProgress(t, el.composeIndex, 0.02);
     const colorLoss = stageColorLoss(ep);
     const shapeLoss = stageShapeLoss(ep);
@@ -253,6 +262,7 @@ function buildBackgroundTokens() {
       token: ["const", "ctx", "fillRect", "setTransform", "rotate"][i % 5],
       composeIndex: 1200 + i,
       tx: random(-8, 14),
+      keepRank: random(),
     });
   }
 }
@@ -273,8 +283,16 @@ function buildMountainElements() {
       composeIndex: idx,
       tx: random(-10, 16),
       ty: random(-6, 7),
+      keepRank: random(),
     });
   }
+}
+
+function getActiveElementRatio() {
+  const transitionSteps = STAGE1_STEPS + STAGE2_STEPS;
+  const progress = constrain(stageStep / transitionSteps, 0, 1);
+  const eased = Math.pow(progress, ELEMENT_REDUCTION_RATE);
+  return lerp(1, STAGE3_KEEP_RATIO, eased);
 }
 
 function buildComposeTargets() {
