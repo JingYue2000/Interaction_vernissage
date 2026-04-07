@@ -3,12 +3,12 @@ const H = 1200;
 
 const SETTINGS = {
   seed: null,
-  complexity: 0.56,
+  complexity: 0.2,
   preChangeT: 0.2,
   stageEase: 0.22,
-  stage1Steps: 14,
-  stage2Steps: 16,
-  stage3Steps: 44,
+  stage1Steps: 5,
+  stage2Steps: 5,
+  stage3Steps: 10,
 };
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -27,42 +27,44 @@ const COMPLEXITY = clamp(Number(SETTINGS.complexity), 0.2, 1.0);
 
 const PRECHANGE_T = clamp(Number(SETTINGS.preChangeT), 0.02, 0.6);
 const STAGE_EASE = clamp(Number(SETTINGS.stageEase), 0.05, 0.45);
-const STAGE1_STEPS = Math.max(1, Math.floor(Number(SETTINGS.stage1Steps) || 14));
-const STAGE2_STEPS = Math.max(1, Math.floor(Number(SETTINGS.stage2Steps) || 16));
-const STAGE3_STEPS = Math.max(1, Math.floor(Number(SETTINGS.stage3Steps) || 44));
+const STAGE1_STEPS = Math.max(
+  1,
+  Math.floor(Number(SETTINGS.stage1Steps) || 14),
+);
+const STAGE2_STEPS = Math.max(
+  1,
+  Math.floor(Number(SETTINGS.stage2Steps) || 16),
+);
+const STAGE3_STEPS = Math.max(
+  1,
+  Math.floor(Number(SETTINGS.stage3Steps) || 44),
+);
 const STAGE_TOTAL_STEPS = STAGE1_STEPS + STAGE2_STEPS + STAGE3_STEPS;
 
-const MOUNTAIN_COUNT = Math.floor(420 + COMPLEXITY * 460);
-const SKY_FRAG_COUNT = Math.floor(180 + COMPLEXITY * 240);
-
-const PAGE_BG_START = "#8ea5cd";
-
-const PAL_SKY_TOP = [147, 169, 208];
-const PAL_SKY_MID = [128, 150, 192];
-const PAL_SKY_LOW = [103, 123, 161];
-const PAL_MTN_A = [23, 34, 63];
-const PAL_MTN_B = [52, 68, 104];
+const MOUNTAIN_COUNT = 800;
+const BG_TOKEN_COUNT = Math.floor(220 + COMPLEXITY * 240);
+const PAGE_BG_START = "#000000";
 
 const CODE_SNIPPETS = [
   "const C = Math.cos;",
-  "setTransform(i, 0, 0, i, 880 + i + 3 * i * C(i), 700 + 2 * i * C(i / 400));",
-  "rotate(i / 6 + t / 2);",
-  "fillRect(2, 2, 2, 2);",
-  "for (let i = 0; i < 800; i++) mountain.push(point);",
-  "const bg = lerpColor(night, paper, stage2Fade);",
+  "for (let i = 800; i--; ) {",
+  "ctx.setTransform(i, 0, 0, i, 880 + i + 3 * i * C(i), 700 + 2 * i * C(i / 400));",
+  "ctx.rotate(i / 6 + t / 2);",
+  "ctx.fillStyle = `rgba(${i/5}, ${i/4}, ${i/3}, 0.07)`;",
+  "ctx.fillRect(-1, -1, 2, 2);",
   "const morph = s1;",
   "const t = s1 < 1 ? 0 : s2 < 1 ? PRECHANGE_T * s2 : lerp(PRECHANGE_T, 1, s3);",
-  "const token = lineFromSource(snippet, idx, 42);",
+  "const ep = elementProgress(t, idx, 0.06);",
   "if (key === ' ') stageStep += 1;",
-  "drawMountainCode(layer, element, t, morph);",
+  "drawMountainToCode(layer, element, t, morph);",
 ];
 
 let canvasRef;
-let skyLayer;
+let bgLayer;
 let mountainLayer;
 let composeTargets = [];
 let mountainElements = [];
-let skyFragments = [];
+let bgTokens = [];
 
 let stageStep = 0;
 let stageVisual = 0;
@@ -73,10 +75,10 @@ function setup() {
   frameRate(60);
   smooth();
 
-  skyLayer = createGraphics(W, H);
+  bgLayer = createGraphics(W, H);
   mountainLayer = createGraphics(W, H);
 
-  [skyLayer, mountainLayer].forEach((l) => {
+  [bgLayer, mountainLayer].forEach((l) => {
     l.smooth();
     l.textFont("Courier New");
     l.textAlign(CENTER, CENTER);
@@ -86,11 +88,11 @@ function setup() {
   noiseSeed(SEED);
 
   buildComposeTargets();
-  buildSkyFragments();
+  buildBackgroundTokens();
   buildMountainElements();
 
   fitCanvas();
-  console.info("Interaction3 mountain-code seed:", SEED, "complexity:", COMPLEXITY.toFixed(2));
+  console.info("Interaction3 huaguoshan mountain->code seed:", SEED);
 }
 
 function draw() {
@@ -105,185 +107,180 @@ function draw() {
 
   updatePageBackground(stage2BgFade);
 
-  skyLayer.clear();
+  bgLayer.clear();
   mountainLayer.clear();
 
-  drawBackground(stage2BgFade, t);
-  drawSkyTextMatter(t, morph);
-  drawMountainCodeMatter(t, morph);
+  drawBackgroundMatter(t, morph, stage2BgFade);
+  drawMountainMatter(t, morph);
 
   background(255);
-  image(skyLayer, 0, 0);
+  image(bgLayer, 0, 0);
   image(mountainLayer, 0, 0);
 }
 
-function drawBackground(stage2BgFade, t) {
-  const avgLoss = stageColorLoss(t);
-  const bgT = constrain(stage2BgFade * 0.86 + avgLoss * 0.14, 0, 1);
-  const topC = lerpColor(color(PAL_SKY_TOP[0], PAL_SKY_TOP[1], PAL_SKY_TOP[2]), color(255), bgT);
-  const midC = lerpColor(color(PAL_SKY_MID[0], PAL_SKY_MID[1], PAL_SKY_MID[2]), color(255), bgT);
-  const lowC = lerpColor(color(PAL_SKY_LOW[0], PAL_SKY_LOW[1], PAL_SKY_LOW[2]), color(255), bgT);
+function drawBackgroundMatter(t, morph, stage2BgFade) {
+  const darkness = 1 - stage2BgFade;
+  bgLayer.noStroke();
+  bgLayer.fill(0, 0, 0, 255 * darkness);
+  bgLayer.rect(0, 0, W, H);
 
-  for (let y = 0; y < H; y += 2) {
-    const p = y / H;
-    const c = p < 0.58 ? lerpColor(topC, midC, p / 0.58) : lerpColor(midC, lowC, (p - 0.58) / 0.42);
-    skyLayer.stroke(c);
-    skyLayer.line(0, y, W, y);
-  }
+  const codeAppear = ss(0.04, 0.86, morph);
+  bgLayer.textAlign(CENTER, CENTER);
 
-  const hazeAlpha = 126 * (1 - ss(0.35, 1, t));
-  skyLayer.noStroke();
-  skyLayer.fill(184, 200, 226, hazeAlpha * 0.72);
-  skyLayer.ellipse(W * 0.5, H * 0.72, W * 1.34, H * 0.56);
-  skyLayer.fill(166, 185, 218, hazeAlpha * 0.52);
-  skyLayer.ellipse(W * 0.5, H * 0.82, W * 1.18, H * 0.42);
-  skyLayer.fill(70, 88, 126, 34 * (1 - ss(0.22, 1, t)));
-  skyLayer.ellipse(W * 0.5, H * 1.02, W * 1.26, H * 0.58);
-}
-
-function drawSkyTextMatter(t, morph) {
-  skyLayer.push();
-  skyLayer.textAlign(CENTER, CENTER);
-  skyLayer.noStroke();
-
-  for (const f of skyFragments) {
-    const ep = elementProgress(t, f.composeIndex, 0.06);
+  for (const b of bgTokens) {
+    const ep = elementProgress(t, b.composeIndex, 0.12);
     const colorLoss = stageColorLoss(ep);
     const shapeLoss = stageShapeLoss(ep);
     const moveLoss = stageMoveLoss(ep);
-    const target = getComposeTarget(f.composeIndex);
+    const target = getComposeTarget(b.composeIndex);
 
-    const x = lerp(f.x, target.x + f.tx, moveLoss);
-    const y = lerp(f.y, target.y, moveLoss);
+    const x = lerp(b.x, target.x + b.tx, moveLoss);
+    const y = lerp(b.y, target.y, moveLoss);
 
     if (morph < 1) {
-      const c = lerpColor(color(f.colA[0], f.colA[1], f.colA[2]), color(f.colB[0], f.colB[1], f.colB[2]), f.mix);
-      c.setAlpha(f.alpha * (1 - morph));
-      skyLayer.fill(c);
-      if (shapeLoss < 0.55) {
-        skyLayer.rect(x - f.w * 0.5, y - f.h * 0.5, f.w, f.h, 2);
+      const a = b.alpha * (1 - morph) * darkness;
+      bgLayer.fill(14 + b.tint, 20 + b.tint, 26 + b.tint * 1.1, a);
+      if (shapeLoss < 0.62) {
+        bgLayer.rectMode(CENTER);
+        bgLayer.rect(x, y, b.w * (1 - shapeLoss * 0.5), b.h, 1.5);
       }
     }
 
-    const codeAppear = ss(0.05, 0.88, morph);
     if (codeAppear <= 0.001) continue;
 
-    const tc = morphColorToPlain(color(190, 180, 255), colorLoss + moveLoss * 0.2);
-    tc.setAlpha((34 + f.alpha * 1.2) * codeAppear);
-    skyLayer.fill(tc);
+    const tc = morphColorToPlain(
+      color(130, 150, 185),
+      colorLoss + moveLoss * 0.2,
+    );
+    tc.setAlpha((18 + b.alpha * 0.9) * codeAppear);
+    bgLayer.fill(tc);
+    bgLayer.textSize(lerp(b.size, 12, shapeLoss * 0.76 + moveLoss * 0.24));
 
-    skyLayer.textSize(lerp(f.size, 12, shapeLoss * 0.8 + moveLoss * 0.2));
-    const line = shapeLoss < 0.48 ? f.token : lineFromSource(f.snippet, f.composeIndex, 30);
-    if (moveLoss > 0.82) skyLayer.textAlign(LEFT, TOP);
-    skyLayer.text(line, x, y);
-    if (moveLoss > 0.82) skyLayer.textAlign(CENTER, CENTER);
+    const text =
+      shapeLoss < 0.5
+        ? b.token
+        : lineFromSource(b.snippet, b.composeIndex + 3, 34);
+
+    if (moveLoss > 0.84) bgLayer.textAlign(LEFT, TOP);
+    bgLayer.text(text, x, y);
+    if (moveLoss > 0.84) bgLayer.textAlign(CENTER, CENTER);
   }
-
-  skyLayer.pop();
 }
 
-function drawMountainCodeMatter(t, morph) {
+function drawMountainMatter(t, morph) {
   mountainLayer.push();
   mountainLayer.textAlign(CENTER, CENTER);
   mountainLayer.noStroke();
 
   const mt = millis() * 0.001;
+  const codeAppear = ss(0.06, 0.9, morph);
+
   for (const el of mountainElements) {
     const ep = elementProgress(t, el.composeIndex, 0.02);
     const colorLoss = stageColorLoss(ep);
     const shapeLoss = stageShapeLoss(ep);
     const moveLoss = stageMoveLoss(ep);
 
+    // Original piece math from work/l.js.
     const i = el.i;
-    const x0 = 880 + i + 3 * i * cos(i + mt * 0.8);
-    const y0 = 700 + 2 * i * cos(i / 400);
-    const a0 = i / 6 + mt / 2;
+    const tx = 880 + i + 3 * i * cos(i);
+    const ty = 700 + 2 * i * cos(i / 400);
+    const ang = i / 6 + mt / 2;
+    const baseSize = max(2, i * 2);
 
     const target = getComposeTarget(el.composeIndex);
-    const px = lerp(x0, target.x + el.tx, moveLoss);
-    const py = lerp(y0, target.y + el.ty, moveLoss);
-    const rot = lerp(a0, 0, shapeLoss);
-    const boxSize = lerp(el.size, 12, shapeLoss * 0.85 + moveLoss * 0.15);
+    const px = lerp(tx, target.x + el.tx, moveLoss);
+    const py = lerp(ty, target.y + el.ty, moveLoss);
+    const rot = lerp(ang, 0, shapeLoss);
 
     if (morph < 1) {
-      const col = lerpColor(color(PAL_MTN_A[0], PAL_MTN_A[1], PAL_MTN_A[2]), color(PAL_MTN_B[0], PAL_MTN_B[1], PAL_MTN_B[2]), el.mix);
-      col.setAlpha(el.alpha * (1 - morph));
+      const srcCol = color(el.r, el.g, el.b, 255 * el.a * (1 - morph));
+      const drawSize = lerp(baseSize, 13, shapeLoss * 0.8 + moveLoss * 0.2);
       mountainLayer.push();
       mountainLayer.translate(px, py);
       mountainLayer.rotate(rot);
-      mountainLayer.fill(col);
       mountainLayer.rectMode(CENTER);
-      mountainLayer.rect(0, 0, boxSize, boxSize);
+      mountainLayer.noStroke();
+      mountainLayer.fill(srcCol);
+      mountainLayer.rect(0, 0, drawSize, drawSize);
       mountainLayer.pop();
     }
 
-    const codeAppear = ss(0.06, 0.9, morph);
     if (codeAppear <= 0.001) continue;
 
-    const tc = morphColorToPlain(color(el.baseCol), colorLoss + moveLoss * 0.18);
-    tc.setAlpha((42 + el.alpha * 1.4) * codeAppear);
+    const tc = morphColorToPlain(
+      color(el.r, el.g, el.b),
+      colorLoss + moveLoss * 0.2,
+    );
+    tc.setAlpha((26 + el.a * 210) * codeAppear);
 
     mountainLayer.push();
     mountainLayer.translate(px, py);
     mountainLayer.rotate(rot * (1 - shapeLoss));
     mountainLayer.fill(tc);
-    mountainLayer.textSize(lerp(boxSize * 0.78, 12, shapeLoss * 0.8 + moveLoss * 0.2));
-    const text = shapeLoss < 0.5 ? el.snippet : lineFromSource(el.snippet, el.composeIndex, 36);
-    if (moveLoss > 0.82) mountainLayer.textAlign(LEFT, TOP);
+    mountainLayer.textSize(
+      lerp(max(8, baseSize * 0.15), 12, shapeLoss * 0.84 + moveLoss * 0.16),
+    );
+
+    const text =
+      shapeLoss < 0.52
+        ? el.token
+        : lineFromSource(el.snippet, el.composeIndex, 42);
+
+    if (moveLoss > 0.84) mountainLayer.textAlign(LEFT, TOP);
     mountainLayer.text(text, 0, 0);
     mountainLayer.pop();
 
-    if (moveLoss > 0.82) mountainLayer.textAlign(CENTER, CENTER);
+    if (moveLoss > 0.84) mountainLayer.textAlign(CENTER, CENTER);
   }
 
   mountainLayer.pop();
 }
 
-function buildSkyFragments() {
-  skyFragments = [];
-  for (let i = 0; i < SKY_FRAG_COUNT; i++) {
-    const yy = random(H * 0.05, H * 0.68);
-    skyFragments.push({
-      x: random(30, W - 30),
-      y: yy,
-      w: random(10, 48),
-      h: random(2, 10),
-      size: random(8, 13),
-      alpha: random(12, 44),
-      mix: random(),
-      colA: [157, 178, 214],
-      colB: [130, 153, 197],
+function buildBackgroundTokens() {
+  bgTokens = [];
+  for (let i = 0; i < BG_TOKEN_COUNT; i++) {
+    const y = random(H * 0.04, H * 0.95);
+    bgTokens.push({
+      x: random(18, W - 18),
+      y,
+      w: random(4, 26),
+      h: random(1.5, 5),
+      size: random(8, 12),
+      alpha: random(8, 30),
+      tint: random(0, 34),
       snippet: CODE_SNIPPETS[i % CODE_SNIPPETS.length],
-      token: ["const", "bg", "mountain", "lerp", "fillRect"][i % 5],
-      composeIndex: i,
-      tx: random(-10, 18),
+      token: ["const", "ctx", "fillRect", "setTransform", "rotate"][i % 5],
+      composeIndex: 1200 + i,
+      tx: random(-8, 14),
     });
   }
 }
 
 function buildMountainElements() {
   mountainElements = [];
-  for (let k = 0; k < MOUNTAIN_COUNT; k++) {
-    const i = map(k, 0, Math.max(1, MOUNTAIN_COUNT - 1), 0, 800);
-    const snippet = CODE_SNIPPETS[k % CODE_SNIPPETS.length];
+  for (let idx = 0; idx < MOUNTAIN_COUNT; idx++) {
+    const i = MOUNTAIN_COUNT - 1 - idx;
+    const snippet = CODE_SNIPPETS[idx % CODE_SNIPPETS.length];
     mountainElements.push({
       i,
-      size: random(2, 18),
-      alpha: random(56, 128),
-      mix: random(),
+      r: i / 5,
+      g: i / 4,
+      b: i / 3,
+      a: 0.07,
       snippet,
-      composeIndex: k,
-      tx: random(-12, 22),
-      ty: random(-6, 8),
-      baseCol: random(["#1c2e57", "#273b66", "#2f476f", "#1f5b65"]),
+      token: ["i", "C(i)", "fillRect", "setTransform", "rgba"][idx % 5],
+      composeIndex: idx,
+      tx: random(-10, 16),
+      ty: random(-6, 7),
     });
   }
 }
 
 function buildComposeTargets() {
   composeTargets = [];
-  const x = 28;
-  const top = 30;
+  const x = 24;
+  const top = 28;
   const lineH = 16;
   let y = top;
   let i = 0;
@@ -291,7 +288,7 @@ function buildComposeTargets() {
     composeTargets.push({
       x,
       y,
-      line: lineFromSource(CODE_SNIPPETS[i % CODE_SNIPPETS.length], i, 82),
+      line: lineFromSource(CODE_SNIPPETS[i % CODE_SNIPPETS.length], i, 84),
       index: i,
     });
     y += lineH;
@@ -301,7 +298,7 @@ function buildComposeTargets() {
 
 function getComposeTarget(index) {
   if (composeTargets.length === 0) {
-    return { x: 28, y: 30, line: "const mountain = [];", index: 0 };
+    return { x: 24, y: 28, line: "for (let i = 800; i--; ) { }", index: 0 };
   }
   return composeTargets[index % composeTargets.length];
 }
@@ -334,7 +331,7 @@ function stageMoveLoss(ep) {
 }
 
 function stableHash(n) {
-  let x = Math.sin((n + 1) * 12.9898) * 43758.5453;
+  const x = Math.sin((n + 1) * 12.9898) * 43758.5453;
   return Math.abs(Math.floor((x - Math.floor(x)) * 100000));
 }
 
@@ -343,7 +340,7 @@ function lineFromSource(source, idx, targetChars = 48) {
     .replace(/[^\w\[\]\(\)\{\};=<>+\-*\/]/g, " ")
     .split(/\s+/)
     .filter(Boolean);
-  const pool = words.length > 0 ? words : ["const", "mountain", "draw", "code"];
+  const pool = words.length > 0 ? words : ["const", "ctx", "draw", "mountain"];
   let out = "";
   let k = 0;
   while (out.length < targetChars) {
@@ -359,7 +356,11 @@ function morphColorToPlain(c, t) {
   const gray = red(col) * 0.299 + green(col) * 0.587 + blue(col) * 0.114;
   const gCol = color(gray, gray, gray);
   const kCol = color(0, 0, 0);
-  return lerpColor(lerpColor(col, gCol, ss(0.08, 0.86, t)), kCol, ss(0.72, 1, t));
+  return lerpColor(
+    lerpColor(col, gCol, ss(0.08, 0.86, t)),
+    kCol,
+    ss(0.72, 1, t),
+  );
 }
 
 function updatePageBackground(stage2Fade) {
@@ -395,7 +396,7 @@ function keyPressed() {
     return false;
   }
   if (key === "s" || key === "S") {
-    saveCanvas(canvasRef.elt, "interaction3-mountain-code", "jpg");
+    saveCanvas(canvasRef.elt, "huaguoshan-mountain-to-code", "jpg");
     return false;
   }
   return true;
