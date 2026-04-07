@@ -49,10 +49,16 @@ const STAGE_TOTAL_STEPS = STAGE1_STEPS + STAGE2_STEPS + STAGE3_STEPS;
 
 const MOUNTAIN_COUNT = 800;
 const BG_TOKEN_COUNT = Math.floor(220 + COMPLEXITY * 240);
-const PAGE_BG_START = "#000000";
+const PAGE_BG_START = "#8ea5cd";
 const MOUNTAIN_RENDER_SCALE = 0.5;
 const BG_RENDER_INTERVAL = 2;
 const MOUNTAIN_RENDER_INTERVAL = 2;
+const FINAL_FONT_SIZE = 22;
+const FINAL_LINE_HEIGHT = 26;
+const FINAL_CODE_X = 24;
+const FINAL_CODE_TOP = 32;
+const FINAL_CODE_WIDTH = 1320;
+const TARGETS_PER_LINE = 18;
 
 const CODE_SNIPPETS = [
   "const C = Math.cos;",
@@ -159,12 +165,13 @@ function draw() {
 }
 
 function drawBackgroundMatter(t, morph, s3, stage2BgFade, activeRatio) {
-  const darkness = 1 - stage2BgFade;
+  const bgFade = 1 - stage2BgFade;
   const stage3Mix = ss(0.08, 1, s3);
-  const stage3Lock = ss(0.55, 1, s3);
+  const stage3Lock = ss(0.2, 0.92, s3);
   bgLayer.rectMode(CORNER);
   bgLayer.noStroke();
-  bgLayer.fill(0, 0, 0, 255 * darkness);
+  const baseBg = lerpColor(color(142, 165, 205), color(255), stage2BgFade);
+  bgLayer.fill(baseBg);
   bgLayer.rect(0, 0, W, H);
 
   const codeAppear = ss(0.04, 0.86, morph);
@@ -184,7 +191,7 @@ function drawBackgroundMatter(t, morph, s3, stage2BgFade, activeRatio) {
     const y = lerp(yMove, target.y, stage3Lock);
 
     if (morph < 1) {
-      const a = b.alpha * (1 - morph) * darkness;
+      const a = b.alpha * (1 - morph) * (0.35 + 0.65 * bgFade);
       bgLayer.fill(14 + b.tint, 20 + b.tint, 26 + b.tint * 1.1, a);
       if (shapeLoss < 0.62) {
         bgLayer.rectMode(CENTER);
@@ -200,13 +207,14 @@ function drawBackgroundMatter(t, morph, s3, stage2BgFade, activeRatio) {
       color(130, 150, 185),
       colorLoss + moveLoss * 0.2,
     );
-    const tc = lerpColor(plain, color(0, 0, 0), ss(0.2, 1, s3));
-    tc.setAlpha((12 + b.alpha * 0.85) * codeAppear * (0.85 + stage3Mix * 0.3));
+    const tc = lerpColor(plain, color(0, 0, 0), ss(0.15, 1, s3));
+    const finalAlpha = 232;
+    tc.setAlpha(lerp((12 + b.alpha * 0.85) * codeAppear, finalAlpha, stage3Mix));
     bgLayer.fill(tc);
     bgLayer.textSize(
       lerp(b.size, 12, shapeLoss * 0.76 + moveLoss * 0.24) *
         (1 - stage3Mix) +
-        12 * stage3Mix,
+        FINAL_FONT_SIZE * stage3Mix,
     );
 
     let text =
@@ -238,10 +246,11 @@ function drawFinalCodePage(s3) {
   c.setAlpha(40 + 215 * appear);
   noStroke();
   fill(c);
+  textSize(FINAL_FONT_SIZE);
 
-  const x = 24;
-  const top = 28;
-  const lineH = 16;
+  const x = FINAL_CODE_X;
+  const top = FINAL_CODE_TOP;
+  const lineH = FINAL_LINE_HEIGHT;
   let y = top;
   for (const line of FINAL_CODE_LINES) {
     if (y > H - 24) break;
@@ -260,7 +269,7 @@ function drawMountainMatter(t, morph, s3, activeRatio) {
   const codeAppear = ss(0.06, 0.9, morph);
   const rs = MOUNTAIN_RENDER_SCALE;
   const stage3Mix = ss(0.08, 1, s3);
-  const stage3Lock = ss(0.58, 1, s3);
+  const stage3Lock = ss(0.2, 0.92, s3);
 
   for (const el of mountainElements) {
     if (el.keepRank > activeRatio) continue;
@@ -302,8 +311,9 @@ function drawMountainMatter(t, morph, s3, activeRatio) {
       color(el.r, el.g, el.b),
       colorLoss + moveLoss * 0.2,
     );
-    const tc = lerpColor(plain, color(0, 0, 0), ss(0.2, 1, s3));
-    tc.setAlpha((26 + el.a * 210) * codeAppear * (0.84 + stage3Mix * 0.36));
+    const tc = lerpColor(plain, color(0, 0, 0), ss(0.15, 1, s3));
+    const finalAlpha = 232;
+    tc.setAlpha(lerp((26 + el.a * 210) * codeAppear, finalAlpha, stage3Mix));
 
     mountainLayer.push();
     mountainLayer.translate(px, py);
@@ -312,7 +322,7 @@ function drawMountainMatter(t, morph, s3, activeRatio) {
     mountainLayer.textSize(
       (lerp(max(8, baseSize * 0.15), 12, shapeLoss * 0.84 + moveLoss * 0.16) *
         (1 - stage3Mix) +
-        12 * stage3Mix) *
+        FINAL_FONT_SIZE * stage3Mix) *
         rs,
     );
 
@@ -389,21 +399,31 @@ function getActiveElementRatio() {
 
 function buildComposeTargets() {
   composeTargets = [];
-  const x = 24;
-  const top = 28;
-  const lineH = 16;
-  let y = top;
-  let i = 0;
-  while (y < H - 24) {
-    const codeLine = FINAL_CODE_LINES[i % FINAL_CODE_LINES.length];
+  let idx = 0;
+  for (let lineIdx = 0; lineIdx < FINAL_CODE_LINES.length; lineIdx++) {
+    const line = FINAL_CODE_LINES[lineIdx];
+    const y = FINAL_CODE_TOP + lineIdx * FINAL_LINE_HEIGHT;
+
+    // Left anchor per line for final readability alignment.
     composeTargets.push({
-      x,
+      x: FINAL_CODE_X,
       y,
-      line: codeLine,
-      index: i,
+      line,
+      index: idx++,
     });
-    y += lineH;
-    i += 1;
+
+    // Distributed anchors across code width so migrated elements form
+    // the block footprint instead of a single vertical strip.
+    for (let s = 0; s < TARGETS_PER_LINE; s++) {
+      const nx = TARGETS_PER_LINE <= 1 ? 0 : s / (TARGETS_PER_LINE - 1);
+      const x = FINAL_CODE_X + nx * FINAL_CODE_WIDTH;
+      composeTargets.push({
+        x: x + random(-8, 8),
+        y: y + random(-2.2, 2.2),
+        line,
+        index: idx++,
+      });
+    }
   }
 }
 
