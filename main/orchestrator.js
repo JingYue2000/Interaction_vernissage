@@ -19,6 +19,7 @@ let state = "showing-first";
 let autoTimer = 0;
 let fadeRaf = 0;
 let spaceTimes = [];
+let firstSpaceCount = 0;
 
 function boot() {
   host = document.getElementById("host");
@@ -55,8 +56,12 @@ function onKeyDown(e) {
   if (!isSpaceKey(e)) return;
   if (state === "showing-first") {
     e.preventDefault();
-    clearAutoTimer();
-    startTransitionForward();
+    firstSpaceCount++;
+    if (firstSpaceCount >= 10) {
+      firstSpaceCount = 0;
+      clearAutoTimer();
+      startTransitionForward();
+    }
   }
   // In transition-* states: transition iframe has focus, handles spacebar itself
   // In showing-second: bridge postMessage handles accumulation
@@ -123,6 +128,7 @@ function startTransitionBackward() {
 function showFirstArtwork() {
   state = "showing-first";
   setBg(ORCH.BG_FIRST);
+  firstSpaceCount = 0;
   var newFrame = createFrame("broken_dream.html", "camera");
   crossfadeTo(newFrame, function () {
     window.focus();
