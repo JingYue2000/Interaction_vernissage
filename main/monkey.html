@@ -1,0 +1,11 @@
+<canvas id=c></canvas>
+<script src="../花果山群猴_见龙王魂飞魄散/work/l.js"></script>
+<script>
+document.addEventListener("keydown", function (e) {
+  if (e.code === "Space" || e.key === " " || e.keyCode === 32) {
+    if (window.parent !== window) {
+      window.parent.postMessage({ channel: "main-bridge", type: "space" }, "*");
+    }
+  }
+});
+</script>
